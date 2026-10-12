@@ -14,10 +14,16 @@ extends CharacterBody3D
 @export var walk_speed := 4.0
 ## 冲刺速度。计划书 2.2 要求「高响应」，所以它应该明显更快。
 @export var sprint_speed := 8.5
-## 加速速率。越大越「硬」，越小越「滑」。
+## 加速速率。越大越「硬」，越小越「滑」。它只管「起步多快」。
 @export var acceleration := 45.0
 ## 松手后的减速速率。它比 acceleration 小，你就会有惯性。
 @export var deceleration := 28.0
+## 转身速率（度 / 秒）。它只管「方向转得多快」，和 acceleration 是两件事。
+## 分开之后，才能同时做到「按下立刻起步」+「转身被甩出去」——
+## 这两件事如果挤在 acceleration 里，就会互相打架。
+## 调大 = 指哪转哪（无惯性）；调小 = 转身要画个弧（有惯性）。
+## 720 ≈ 半秒转过 180°；2000 基本等于没有转向惯性。
+@export var steer_rate_deg := 720.0
 
 @export_group("视角")
 ## 鼠标灵敏度。等价于计划书里写的 turn_response。
@@ -82,11 +88,25 @@ func _physics_process(delta: float) -> void:
 	# Godot 里 -Z 是前方，所以前进方向是 -basis.z
 	var b := global_transform.basis
 	var wish := b.x * input.x + b.z * input.y
+	var has_input := wish.length_squared() > 0.0001
 
 	var speed: float = sprint_speed if Input.is_action_pressed("sprint") else walk_speed
 	var horizontal := Vector3(velocity.x, 0.0, velocity.z)
-	var rate: float = acceleration if wish.length_squared() > 0.0001 else deceleration
-	horizontal = horizontal.move_toward(wish * speed, rate * delta)
+
+	if has_input:
+		# 方向与大小分开算，这样「起步快」和「转身慢」就不打架。
+		var wanted_dir := wish.normalized()
+		# 已经在动时，朝向取「当前速度方向」；从静止起步时才直接用输入方向。
+		var dir := horizontal.normalized() if horizontal.length() > 0.05 else wanted_dir
+		var max_turn := deg_to_rad(steer_rate_deg) * delta
+		var angle := dir.signed_angle_to(wanted_dir, Vector3.UP)
+		dir = dir.rotated(Vector3.UP, clampf(angle, -max_turn, max_turn))
+		var cur := move_toward(horizontal.length(), speed, acceleration * delta)
+		horizontal = dir * cur
+	else:
+		# 松手：方向不再改变（这是惯性的来源之一），只让速度衰减。
+		horizontal = horizontal.move_toward(Vector3.ZERO, deceleration * delta)
+
 	velocity.x = horizontal.x
 	velocity.z = horizontal.z
 

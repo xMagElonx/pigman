@@ -118,6 +118,7 @@ func _build_tuner() -> void:
 		{"label": "sprint_speed   冲刺速度", "target": _player, "prop": "sprint_speed", "min": 1.0, "max": 22.0, "step": 0.1},
 		{"label": "acceleration   加速度", "target": _player, "prop": "acceleration", "min": 2.0, "max": 150.0, "step": 1.0},
 		{"label": "deceleration   减速度", "target": _player, "prop": "deceleration", "min": 2.0, "max": 150.0, "step": 1.0},
+		{"label": "steer_rate_deg   转身速率 °/秒", "target": _player, "prop": "steer_rate_deg", "min": 60.0, "max": 2000.0, "step": 10.0},
 		{"label": "mouse_sensitivity   鼠标灵敏度", "target": _player, "prop": "mouse_sensitivity", "min": 0.0005, "max": 0.008, "step": 0.0001},
 		{"label": "pitch_limit_deg   抬头 / 低头上限", "target": _player, "prop": "pitch_limit_deg", "min": 30.0, "max": 89.0, "step": 1.0},
 		{"label": "eye_height   眼睛高度", "target": _player, "prop": "eye_height", "min": 1.0, "max": 2.2, "step": 0.01},
