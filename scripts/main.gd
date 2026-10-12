@@ -1,9 +1,19 @@
 extends Node3D
-## M0 / M1 的入口。
+## M0 / M1 / M2 的入口。
 ##
 ## 这个文件的职责只有一件事：组装。
-## 环境 → 灰盒房间 → 玩家 → 调参面板。
+## 环境 → 灰盒房间 → 玩家 → 武器 → 靶子 → 调参面板。
 ## 所有能调的东西都在被组装的脚本里，不在这里 —— 这样它永远不会变成一团泥。
+##
+## ── 为什么靶子排在这个顺序里（2026-10-12 修正）──────────────────
+## 移动不是战斗的前置，移动是战斗的一部分。
+## 在一个空房间里拖那几个滑条，你没有可失去的东西 —— 也就分不出
+## 「这个身体听我的话」和「这个身体只是没被我用来做任何事」。
+## 靶子放进来之后，同一个滑条第一次有了含义：
+##   acceleration 不够 → 敌人已经贴脸了你还没起步
+##   deceleration 太小 → 你冲过头，刀从它旁边划过去
+##   steer_rate 太大  → 你没法在转身时把刀留在它身上
+## 这三个信号，空房间里一个都测不出来。
 
 @export_group("房间")
 ## 房间尺寸（米）。改这里，整个灰盒会按新尺寸重建。
@@ -20,8 +30,20 @@ extends Node3D
 ## 出生点。y 稍微抬高一点，避免第一帧卡进地面。
 @export var spawn_position := Vector3(0.0, 0.2, 3.0)
 
+@export_group("靶子")
+## 近靶：站一米外，只测挥砍本身。
+@export var dummy_near := Vector3(-1.30, 0.0, -0.60)
+## 远靶：站四米外，测「起步 → 冲刺 → 刹车 → 出刀」这一整串。
+@export var dummy_far := Vector3(1.30, 0.0, -3.20)
+## 靶子开关（0 = 隐藏，1 = 显示）。给面板用的，所以是 float。
+## 需要单独验证移动手感时把它拖到 0。
+@export var dummy_switch := 1.0
+
 var _player: PlayerController
+var _weapon: MeleeWeapon
 var _tuner: TunerPanel
+var _dummies: Array[TargetDummy] = []
+var _last_dummy_switch := 1.0
 
 
 func _ready() -> void:
@@ -29,9 +51,11 @@ func _ready() -> void:
 	_build_environment()
 	Graybox.build(self, room_size, with_ceiling, floor_stripes, door_width, door_height)
 	_player = _build_player()
+	_build_weapon()
+	_build_dummies()
 	_build_tuner()
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	print("[PIGMAN M0/M1] WASD 移动 · Shift 冲刺 · Tab 调参面板 · Esc 释放鼠标")
+	print("[PIGMAN M0/M1/M2] WASD 移动 · Shift 冲刺 · 鼠标左键 挥砍 · R 复位靶子 · Tab 调参面板 · Esc 释放鼠标")
 
 
 func _input(event: InputEvent) -> void:
@@ -40,20 +64,48 @@ func _input(event: InputEvent) -> void:
 	if event.is_action_pressed("toggle_panel"):
 		_tuner.toggle()
 		get_viewport().set_input_as_handled()
+	elif event.is_action_pressed("reset_dummies"):
+		for d in _dummies:
+			d.respawn()
 
 
 func _process(_delta: float) -> void:
 	if _tuner == null or _player == null:
 		return
+
+	if not is_equal_approx(_last_dummy_switch, dummy_switch):
+		_last_dummy_switch = dummy_switch
+		_set_dummies_active(dummy_switch >= 0.5)
+
+	var weapon_txt := "武器未装配"
+	if _weapon != null:
+		weapon_txt = "%s   %s" % [_weapon.stats(), _weapon.phase_name()]
+
 	_tuner.set_readout(
-		"水平速度 %.2f m/s    地面 %s    FPS %d"
+		"%s\n速度 %.2f m/s   地面 %s   靶子 %s   FPS %d"
 		% [
+			weapon_txt,
 			_player.horizontal_speed(),
 			"是" if _player.is_on_floor() else "否",
+			_dummy_hp_text(),
 			Engine.get_frames_per_second(),
 		]
 	)
 
+
+func _dummy_hp_text() -> String:
+	var parts: PackedStringArray = []
+	for d in _dummies:
+		parts.append("%d/%d" % [d.hp, d.max_hp])
+	return " · ".join(parts)
+
+
+func _set_dummies_active(v: bool) -> void:
+	for d in _dummies:
+		d.set_active(v)
+
+
+# --- 环境 -------------------------------------------------------------------
 
 func _build_environment() -> void:
 	var we := WorldEnvironment.new()
@@ -75,6 +127,8 @@ func _build_environment() -> void:
 	sun.shadow_enabled = true
 	add_child(sun)
 
+
+# --- 玩家 -------------------------------------------------------------------
 
 func _build_player() -> PlayerController:
 	var p := PlayerController.new()
@@ -107,12 +161,83 @@ func _build_player() -> PlayerController:
 	return p
 
 
+# --- 武器 -------------------------------------------------------------------
+
+func _build_weapon() -> void:
+	var head := _player.get_node_or_null("Head")
+	if head == null:
+		return
+
+	_weapon = MeleeWeapon.new()
+	_weapon.name = "Weapon"
+
+	# Pivot 就是「手腕」：绕它转 y 轴 = 横斩。
+	# 位置放在画面右下角，是因为第一人称里刀身从正中横过去会挡住你看敌人。
+	var pivot := Node3D.new()
+	pivot.name = "Pivot"
+	pivot.position = Vector3(0.30, -0.22, -0.12)
+	_weapon.add_child(pivot)
+
+	var handle := _mesh_box("Handle", Vector3(0.05, 0.05, 0.22), Vector3(0.0, 0.0, 0.07), Color(0.16, 0.15, 0.17))
+	pivot.add_child(handle)
+
+	var guard := _mesh_box("Guard", Vector3(0.24, 0.05, 0.05), Vector3(0.0, 0.0, -0.03), Color(0.36, 0.34, 0.37))
+	pivot.add_child(guard)
+
+	var blade := _mesh_box("Blade", Vector3(0.085, 0.028, 1.15), Vector3(0.0, 0.0, -0.66), Color(0.80, 0.82, 0.86))
+	pivot.add_child(blade)
+
+	# 刀身中点。扫掠检测以它为参照 —— 它比刀尖更代表「刀在哪」。
+	var mid := Marker3D.new()
+	mid.name = "BladeMid"
+	mid.position = Vector3(0.0, 0.0, -0.66)
+	pivot.add_child(mid)
+
+	var sc := ShapeCast3D.new()
+	sc.name = "ShapeCast3D"
+	var sphere := SphereShape3D.new()
+	sphere.radius = _weapon.hit_radius
+	sc.shape = sphere
+	sc.target_position = Vector3.ZERO
+	pivot.add_child(sc)
+
+	head.add_child(_weapon)
+
+
+func _mesh_box(node_name: String, size: Vector3, pos: Vector3, color: Color) -> MeshInstance3D:
+	var mesh := MeshInstance3D.new()
+	mesh.name = node_name
+	var bm := BoxMesh.new()
+	bm.size = size
+	mesh.mesh = bm
+	var m := StandardMaterial3D.new()
+	m.albedo_color = color
+	m.roughness = 0.55
+	m.metallic = 0.35
+	mesh.material_override = m
+	mesh.position = pos
+	return mesh
+
+
+# --- 靶子 -------------------------------------------------------------------
+
+func _build_dummies() -> void:
+	for pos in [dummy_near, dummy_far]:
+		var d := TargetDummy.new()
+		d.name = "Dummy"
+		d.position = pos
+		add_child(d)
+		_dummies.append(d)
+
+
+# --- 调参面板 ---------------------------------------------------------------
+
 func _build_tuner() -> void:
 	_tuner = TunerPanel.new()
 	_tuner.name = "TunerPanel"
 	add_child(_tuner)
 
-	# 这一串就是你的「8 个滑条」。新增参数时只加一行。
+	# 这一串就是你的「滑条」。新增参数时只加一行。
 	var entries: Array = [
 		{"label": "walk_speed   慢走速度", "target": _player, "prop": "walk_speed", "min": 1.0, "max": 12.0, "step": 0.1},
 		{"label": "sprint_speed   冲刺速度", "target": _player, "prop": "sprint_speed", "min": 1.0, "max": 22.0, "step": 0.1},
@@ -125,4 +250,19 @@ func _build_tuner() -> void:
 		{"label": "gravity   重力", "target": _player, "prop": "gravity", "min": 0.0, "max": 60.0, "step": 0.5},
 		{"label": "jump_velocity   跳跃初速（0 = 不跳）", "target": _player, "prop": "jump_velocity", "min": 0.0, "max": 12.0, "step": 0.1},
 	]
-	_tuner.setup(entries, "水平速度 0.00 m/s")
+
+	if _weapon != null:
+		entries.append_array([
+			{"label": "─ 挥击 · 前摇 windup s", "target": _weapon, "prop": "windup", "min": 0.0, "max": 0.5, "step": 0.01},
+			{"label": "─ 挥击 · 命中窗口 active s", "target": _weapon, "prop": "active", "min": 0.02, "max": 0.40, "step": 0.01},
+			{"label": "─ 挥击 · 后摇 recovery s", "target": _weapon, "prop": "recovery", "min": 0.05, "max": 0.80, "step": 0.01},
+			{"label": "─ 挥击 · 扫掠角 °", "target": _weapon, "prop": "swing_angle_deg", "min": 30.0, "max": 200.0, "step": 5.0},
+			{"label": "─ 反馈 · 顿帧 hitstop s", "target": _weapon, "prop": "hitstop", "min": 0.0, "max": 0.20, "step": 0.005},
+			{"label": "─ 反馈 · 屏震 shake m", "target": _weapon, "prop": "shake_strength", "min": 0.0, "max": 0.15, "step": 0.005},
+		])
+
+	entries.append_array([
+		{"label": "─ 靶子开关（0 关 / 1 开）", "target": self, "prop": "dummy_switch", "min": 0.0, "max": 1.0, "step": 1.0},
+	])
+
+	_tuner.setup(entries, "挥击 0 · 命中 0   待机")

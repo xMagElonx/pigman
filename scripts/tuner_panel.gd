@@ -9,7 +9,7 @@ extends CanvasLayer
 ## 这个面板的优先级高于「多做一个敌人」。
 ## 计划书 6.1 已经把「关键参数有可调入口」写成了硬性验收条件。
 
-const PANEL_WIDTH := 360.0
+const PANEL_WIDTH := 404.0
 
 var _panel: PanelContainer
 var _list: VBoxContainer
