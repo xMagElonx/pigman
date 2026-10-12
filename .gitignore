@@ -1,0 +1,11 @@
+# Godot 4 每次打开项目都会重建的导入缓存，不进版本库
+.godot/
+
+# 导出产物
+build/
+export_presets.cfg
+
+# 系统文件
+Thumbs.db
+desktop.ini
+.DS_Store

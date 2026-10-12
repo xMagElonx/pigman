@@ -1,0 +1,22 @@
+; PIGMAN — 第一人称灰盒原型
+; 阶段：v0.2 计划书的 M0（项目骨架）+ M1（移动手感）
+; 打开方式：Godot 4.x → 导入 → 选择本文件所在目录（PigMan/）
+
+config_version=5
+
+[application]
+
+config/name="PIGMAN"
+config/description="M0/M1：灰盒房间 + 第一人称移动 + 调参面板"
+run/main_scene="res://scenes/main.tscn"
+config/icon="res://icon.svg"
+
+[display]
+
+window/size/viewport_width=1600
+window/size/viewport_height=900
+
+[rendering]
+
+renderer/rendering_method="forward_plus"
+anti_aliasing/quality/msaa_3d=1
