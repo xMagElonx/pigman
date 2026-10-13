@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 500" font-family="Consolas, 'Courier New', monospace">
+  <rect x="0" y="0" width="680" height="500" fill="#121316"/>
+  <text x="20" y="24" fill="#c9ccd1" font-size="14" font-weight="bold">屠刀刀身 · 正立面（SPEC_UV V1–V14 · 0.40 m × 0.148 m · 2.70:1）</text>
+  <text x="20" y="42" fill="#7d828a" font-size="10.5">刀面正对镜头时该有的样子。三色分层 = §4 的 3 个材质区（§5.1 修正后：刀带/脊带各成一条连续区）。</text>
+
+  <!-- 主体（mat0） -->
+  <polygon points="562.6,232.0 496.7,266.6 409.3,290.9 310.1,301.0 210.7,301.0 129.2,291.1 75.5,265.0 70,276.3 70,123.0 78.1,139.3 105.2,124.5 260.1,124.6 376.4,128.7 470.5,143.0 473.2,125.0 568.4,176.8 630,210 568.4,243.2"
+           fill="#4c4a47"/>
+  <!-- 刀脊带（mat1，暗） -->
+  <polygon points="70,123.0 103.6,106.4 260.4,106.4 378,110.5 473.2,125.0 470.5,143.0 376.4,128.7 260.1,124.6 105.2,124.5 78.1,139.3"
+           fill="#261f1c"/>
+  <!-- 刃口带（mat2，亮） -->
+  <polygon points="568.4,243.2 501.2,278.4 411.6,303.2 310.8,313.6 210,313.6 126,303.2 70,276.3 75.5,265.0 129.2,291.1 210.7,301.0 310.1,301.0 409.3,290.9 496.7,266.6 562.6,232.0"
+           fill="#c2c4c7"/>
+
+  <!-- 轮廓线 -->
+  <polygon points="70,123.0 103.6,106.4 260.4,106.4 378,110.5 473.2,125.0 568.4,176.8 630,210 568.4,243.2 501.2,278.4 411.6,303.2 310.8,313.6 210,313.6 126,303.2 70,276.3"
+           fill="none" stroke="#8b9099" stroke-width="1"/>
+
+  <!-- 顶点 -->
+  <g fill="#ff5a5a">
+    <circle cx="70" cy="123" r="2.4"/><circle cx="103.6" cy="106.4" r="2.4"/><circle cx="260.4" cy="106.4" r="2.4"/>
+    <circle cx="378" cy="110.5" r="2.4"/><circle cx="473.2" cy="125" r="2.4"/><circle cx="568.4" cy="176.8" r="2.4"/>
+    <circle cx="630" cy="210" r="3.2"/><circle cx="568.4" cy="243.2" r="2.4"/><circle cx="501.2" cy="278.4" r="2.4"/>
+    <circle cx="411.6" cy="303.2" r="2.4"/><circle cx="310.8" cy="313.6" r="2.4"/><circle cx="210" cy="313.6" r="2.4"/>
+    <circle cx="126" cy="303.2" r="2.4"/><circle cx="70" cy="276.3" r="2.4"/>
+  </g>
+  <g fill="#e6a2a2" font-size="9.5">
+    <text x="58" y="140">V1</text><text x="96" y="100">V2</text><text x="252" y="100">V3</text><text x="372" y="104">V4</text>
+    <text x="470" y="119">V5</text><text x="572" y="172">V6</text><text x="636" y="207">V7</text><text x="556" y="258">V8</text>
+    <text x="492" y="294">V9</text><text x="404" y="319">V10</text><text x="300" y="330">V11</text><text x="204" y="330">V12</text>
+    <text x="116" y="319">V13</text><text x="48" y="292">V14</text>
+  </g>
+
+  <!-- 图例 -->
+  <g font-size="11">
+    <rect x="20" y="352" width="16" height="12" fill="#4c4a47"/><text x="42" y="362" fill="#c9ccd1">主体 mat0 (0.30,0.29,0.28)</text>
+    <rect x="250" y="352" width="16" height="12" fill="#261f1c"/><text x="272" y="362" fill="#c9ccd1">刀脊 mat1 (0.15,0.12,0.11)</text>
+    <rect x="470" y="352" width="16" height="12" fill="#c2c4c7"/><text x="492" y="362" fill="#c9ccd1">刃口 mat2 (0.76,0.77,0.78)</text>
+  </g>
+  <text x="20" y="384" fill="#7d828a" font-size="10">明度阶梯 刃(0.77) ≫ 身(0.30) ≫ 脊(0.15) —— 近距三面必可分（F5）。</text>
+  <text x="20" y="400" fill="#7d828a" font-size="10">刃带 ≈9 mm 沿刃口连续；脊带 ≈13 mm 沿刀背连续。若用「重心 u 阈值」分面是分不出这两条带的（见 §5.1）。</text>
+
+  <!-- 截面 inset -->
+  <g transform="translate(600,470)">
+    <polygon points="-22,-40 22,-40 8,-6 -8,-6" fill="#5a5855" stroke="#c2c4c7" stroke-width="1"/>
+    <text x="30" y="-36" fill="#8b9099" font-size="9">脊 5 mm</text>
+    <text x="30" y="-2" fill="#8b9099" font-size="9">刃 1.5 mm</text>
+  </g>
+  <text x="20" y="470" fill="#8b9099" font-size="10">截面是楔形：厚背 → 薄刃（F4）。</text>
+  <text x="20" y="486" fill="#5f646c" font-size="9.5">注：本图为 2D 正立面示意，不含厚度透视；实际 mesh 为沿 x 挤出的楔形棱柱。</text>
+</svg>

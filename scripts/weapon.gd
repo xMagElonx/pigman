@@ -79,9 +79,16 @@ enum Phase { IDLE, WINDUP, ACTIVE, RECOVERY }
 		blade_radius = value
 		_rebuild_shape()
 
-## 刀身长度（米）。**不要手填** —— 由 main.gd 从 Blade 网格的 size 读出来注入。
+## 刀身长度（米）。**不要手填** —— 由 main.gd 从刀身网格的包围盒读出来注入。
 ## 它存在的唯一理由是让「碰撞箱 = 模型的函数」这句话成立。
-var blade_length := 0.80
+##
+## 2026-10-14 夜：加了 setter —— 现在**改长度就立刻重建命中胶囊**。
+## 以前它是个哑变量：改了长度，必须有人记得再调一次 _rebuild_shape()，
+## 忘了就又是「视觉改了、判定没改」。绑死之后这件事不可能再发生。
+var blade_length := 0.80:
+	set(v):
+		blade_length = v
+		_rebuild_shape()
 ## 刀身中点距手腕的距离（米）。同上，由模型注入。
 var blade_center := 0.485
 

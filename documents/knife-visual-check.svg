@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 500" font-family="'Segoe UI','Microsoft YaHei',Consolas,sans-serif">
+  <rect x="0" y="0" width="680" height="500" fill="#121316"/>
+  <rect x="0" y="0" width="680" height="40" fill="#1b1d22"/>
+  <text x="18" y="26" fill="#e8eaed" font-size="15" font-weight="bold">屠刀 · 一屏验收卡</text>
+  <text x="470" y="26" fill="#7d828a" font-size="11">对照右图 · 逐条打勾</text>
+
+  <!-- ───── 左列：动作 ───── -->
+  <g font-size="12.5" fill="#c9ccd1">
+    <text x="18" y="62" fill="#8fb4ff" font-size="13" font-weight="bold">① 打开游戏</text>
+    <text x="18" y="82">按 F5 → 点一下画面锁定鼠标 → 按 Tab 开面板</text>
+
+    <text x="18" y="112" fill="#8fb4ff" font-size="13" font-weight="bold">② 摆正刀面</text>
+    <text x="18" y="132">拖面板里那一行「│ 持刀翻转 roll °」到 ≈</text>
+    <text x="330" y="132" font-size="13" fill="#ffd166" font-weight="bold">−45°</text>
+
+    <text x="18" y="164" fill="#8fb4ff" font-size="13" font-weight="bold">③ 对着右图，逐条看（每行打一个勾）</text>
+  </g>
+  <g font-size="12.5" fill="#d7dae0">
+    <rect x="18" y="176" width="13" height="13" fill="none" stroke="#6b7078"/>
+    <text x="38" y="187"><tspan fill="#ff8a8a" font-weight="bold">F1 刀尖</tspan> — 末端是一个尖点，不是平头</text>
+
+    <rect x="18" y="198" width="13" height="13" fill="none" stroke="#6b7078"/>
+    <text x="38" y="209"><tspan fill="#ff8a8a" font-weight="bold">F2 弧腹</tspan> — 刃那边是外凸的弧，不是直线</text>
+
+    <rect x="18" y="220" width="13" height="13" fill="none" stroke="#6b7078"/>
+    <text x="38" y="231"><tspan fill="#ff8a8a" font-weight="bold">F3 叶形</tspan> — 两条长边不平行（背直、腹鼓）</text>
+
+    <rect x="18" y="242" width="13" height="13" fill="none" stroke="#6b7078"/>
+    <text x="38" y="253"><tspan fill="#ff8a8a" font-weight="bold">F4 楔面</tspan> — 侧倾看，刀身有渐薄的斜面</text>
+
+    <rect x="18" y="264" width="13" height="13" fill="none" stroke="#6b7078"/>
+    <text x="38" y="275"><tspan fill="#ff8a8a" font-weight="bold">F5 亮刃</tspan> — 沿刃口一条明显更亮的白线</text>
+  </g>
+
+  <g font-size="12.5" fill="#c9ccd1">
+    <text x="18" y="306" fill="#8fb4ff" font-size="13" font-weight="bold">④ 怎么判</text>
+    <text x="18" y="326" fill="#8ce99a">· 五条都在 → 通过</text>
+    <text x="18" y="346" fill="#ffd166">· 只缺 F5 → 说一声（材质，我调）</text>
+    <text x="18" y="366" fill="#ff9f9f">· 缺 F2 或 F3 → 形状没生效，说一声</text>
+  </g>
+
+  <!-- 防误判 -->
+  <rect x="14" y="382" width="352" height="52" rx="6" fill="#241d10" stroke="#7a5a12"/>
+  <text x="24" y="402" fill="#ffd166" font-size="12" font-weight="bold">⚠️ 防误判</text>
+  <text x="24" y="420" fill="#e6d6a8" font-size="11.5">把 roll 拖到 0° 时只剩一条细边 = 正常（刀面侧对镜头），</text>
+  <text x="24" y="431" fill="#e6d6a8" font-size="11.5">不是坏了。验收请在 −45° 做。</text>
+
+  <!-- ───── 右列：ground-truth ───── -->
+  <rect x="382" y="52" width="286" height="300" rx="8" fill="#0d0e11" stroke="#2a2d33"/>
+  <text x="394" y="70" fill="#7d828a" font-size="10.5">刀面正对镜头时该有的样子</text>
+
+  <!-- body -->
+  <polygon points="400,187 414.4,175 481.6,175 532,178 572.8,188.5 613.6,226 640,250 613.6,274 584.8,299.5 546.4,317.5 503.2,325 460,325 424,317.5 400,298"
+           fill="#4c4a47"/>
+  <!-- spine band -->
+  <polyline points="400,187 414.4,175 481.6,175 532,178 572.8,188.5 613.6,226 640,250"
+            fill="none" stroke="#1a1512" stroke-width="11" stroke-linejoin="round" stroke-linecap="round"/>
+  <!-- edge band -->
+  <polyline points="640,250 613.6,274 584.8,299.5 546.4,317.5 503.2,325 460,325 424,317.5 400,298"
+            fill="none" stroke="#c2c4c7" stroke-width="8" stroke-linejoin="round" stroke-linecap="round"/>
+
+  <circle cx="640" cy="250" r="3" fill="#ff8a8a"/>
+
+  <!-- callouts -->
+  <g font-size="10.5" fill="#ff8a8a" font-weight="bold">
+    <text x="602" y="238">F1</text>
+    <text x="470" y="166">F3</text>
+    <text x="524" y="343">F2</text>
+    <text x="596" y="272">F5</text>
+  </g>
+  <text x="430" y="252" fill="#9aa0a8" font-size="10">F4 侧倾</text>
+
+  <!-- 示意图例尾注 -->
+  <text x="392" y="372" fill="#5f646c" font-size="10">F1 尖 · F2 下缘弧 · F3 两边不平行 · F5 下缘亮线</text>
+
+  <text x="18" y="470" fill="#5f646c" font-size="11">对不上？把这一屏截图发我即可 —— 一张图胜过一段描述。</text>
+</svg>
