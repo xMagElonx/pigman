@@ -20,14 +20,23 @@ extends Node3D
 ##      模型和命中碰撞箱**共用同一个来源** → 两者不可能再对不上。
 ##   ② 参数持久化：启动时读 user://tuning.cfg，面板改动 0.6 秒后自动写回。
 ##   ③ 跳跃从借用的 ui_accept 改成独立的 jump 动作（空格），并显示跳跃高度。
+##
+## ── 2026-10-14 晚：跳跃默认打开 + 垂直尺 ────────────────────────
+##   ④ jump_velocity 默认 0 → 7.0（跳高约 1.02 m）。
+##      原因见 player_controller.gd 里那段注释：跳跃是**移动变量**，
+##      不是战斗的第四个变量，它属于 M1。用户实测「一点进去就想跳」。
+##   ⑤ 墙上加高度刻度（垂直尺）。地面刻度量「走多远」，它量「跳多高」。
 
 @export_group("房间")
 ## 房间尺寸（米）。改这里，整个灰盒会按新尺寸重建。
 @export var room_size := Vector3(14.0, 3.0, 9.0)
 ## 要不要天花板。默认关掉 —— 开着的话平行光进不来，灰盒会变得很平、很难读深度。
+## ⚠️ 跳跃打开之后这条更值得注意：天花板一开，跳太高会撞头。
 @export var with_ceiling := false
-## 地面每 2 米一道刻度，用来看速度。
+## 地面每 2 米一道刻度，用来看速度（**水平尺**）。
 @export var floor_stripes := true
+## 墙上每 0.5 米一道高度刻度，用来看跳跃（**垂直尺**）。1.0 m 那条是橙色。
+@export var height_marks := true
 ## 北墙门洞的宽与高（米）。M5 会在这里放一扇真的门。
 @export var door_width := 2.2
 @export var door_height := 2.2
@@ -66,7 +75,7 @@ var _tuning_entries: Array = []
 func _ready() -> void:
 	InputActions.ensure()
 	_build_environment()
-	Graybox.build(self, room_size, with_ceiling, floor_stripes, door_width, door_height)
+	Graybox.build(self, room_size, with_ceiling, floor_stripes, door_width, door_height, height_marks)
 	_player = _build_player()
 	_build_weapon()
 
@@ -80,7 +89,7 @@ func _ready() -> void:
 	_build_tuner()
 
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	print("[PIGMAN M0/M1/M2] WASD 移动 · Shift 冲刺 · 鼠标左键 挥砍 · 空格 跳跃(默认关) · R 复位靶子 · Tab 调参面板 · Esc 释放鼠标")
+	print("[PIGMAN M0/M1/M2] WASD 移动 · Shift 冲刺 · 鼠标左键 挥砍 · 空格 跳跃 · R 复位靶子 · Tab 调参面板 · Esc 释放鼠标")
 	if loaded > 0:
 		print("[调参] 已从 %s 载入 %d 项" % [TuningStore.human_path(TuningStore.AUTO_PATH), loaded])
 	else:
@@ -134,12 +143,17 @@ func _process(_delta: float) -> void:
 
 
 ## 跳跃那一格读数。
-## jump_velocity = 0 时明确告诉玩家「怎么开」—— 之前这个信息只存在于代码里，
-## 屏幕上什么都没有，于是「拖了滑条没反应」看起来就像个 bug。
+## 两件事要在这里说清楚（都是曾经「拖了滑条没反应」留下的教训）：
+##   ① jump_velocity = 0 时明确告诉玩家「未开」，而不是留白让人以为是 bug
+##   ② 除了公式算的理论高度，还给出**落地后实测的最高点** ——
+##      前者是设计意图，后者才是这台机器上真的发生的
 func _jump_text() -> String:
 	if _player.jump_velocity <= 0.0:
 		return "跳跃 未开"
-	return "跳高 %.2f m" % _player.jump_height()
+	var peak := _player.last_jump_peak()
+	if peak > 0.05:
+		return "跳高 %.2f m · 实测 %.2f（空格）" % [_player.jump_height(), peak]
+	return "跳高 %.2f m（空格）" % _player.jump_height()
 
 
 func _dummy_hp_text() -> String:
@@ -227,6 +241,11 @@ func _build_weapon() -> void:
 
 	# Pivot 就是「手腕」：绕它转 y 轴 = 横斩。
 	# 位置放在画面右下角，是因为第一人称里刀身从正中横过去会挡住你看敌人。
+	#
+	# ⚠️ 注意这个 -0.22 的 y 偏移：它意味着**刀的基准高度约 1.43 m**
+	#    （眼高 1.65 − 0.22）。靶子全高 2.00 m，所以站着挥刀落在靶身上。
+	#    但跳起 1.02 m 之后刀会升到约 2.45 m —— **高出靶子头顶**。
+	#    这是跳跃一打开就立刻出现的第一个真实冲突，见 player_controller.gd。
 	var pivot := Node3D.new()
 	pivot.name = "Pivot"
 	pivot.position = Vector3(0.30, -0.22, -0.12)

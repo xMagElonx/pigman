@@ -6,7 +6,13 @@ extends RefCounted
 ## M0/M1 只回答一个问题：移动这件事，能不能被看见、被感受到。
 ##
 ## 房间参数由 main.gd 通过 @export 传进来，可以在 Inspector 里直接改。
-## 所有几何体都带碰撞；地面条纹只是视觉参照，不带碰撞。
+## 所有几何体都带碰撞；地面条纹和墙上刻度只是视觉参照，不带碰撞。
+##
+## ── 两把尺子（2026-10-14）────────────────────────────────────────
+##   地面刻度线：**水平尺**，每 2 米一道 —— 量你「走多远」。
+##   墙上高度刻度：**垂直尺**，每 0.5 米一道 —— 量你「跳多高」。
+## 两把尺子是同一条理由：把不可见的量变成可读的参照。
+## 没有尺子，拖滑条就只是盲调 —— 你分不清「我改了」和「我以为我改了」。
 
 const FLOOR_COLOR := Color(0.34, 0.34, 0.36)
 const STRIPE_COLOR := Color(0.50, 0.50, 0.53)
@@ -21,7 +27,8 @@ static func build(
 	with_ceiling: bool,
 	stripes: bool,
 	door_width: float,
-	door_height: float
+	door_height: float,
+	height_marks: bool = true
 ) -> void:
 	var half := room_size * 0.5
 	var t := WALL_THICKNESS
@@ -59,6 +66,37 @@ static func build(
 			var z: float = -half.z + step * (float(i) + 0.5)
 			var col: Color = STRIPE_COLOR if i % 2 == 0 else FLOOR_COLOR.darkened(0.2)
 			_decal(parent, "Stripe_%d" % i, Vector3(room_size.x, 0.015, 0.10), Vector3(0, 0.008, z), col)
+
+	if height_marks:
+		_height_marks(parent, room_size)
+
+
+# --- 高度刻度（垂直尺）-------------------------------------------------------
+#
+# 地面刻度线量的是「你走多远」，它量不了「你跳多高」。
+# 而跳跃一打开，后者立刻是第一个要判断的问题 ——
+# 没有一根垂直的参照，拖 jump_velocity 仍然是在盲调。
+#
+# 1.0 m 那条用门框的橙色：因为「跳不跳得过一米」是这里唯一的关键判断，
+# 它该在一眼之间被读出来，而不是靠数刻度。
+static func _height_marks(parent: Node3D, room_size: Vector3) -> void:
+	var half := room_size * 0.5
+	var length: float = minf(room_size.z - 0.6, 6.0)
+	for h in [0.5, 1.0, 1.5, 2.0]:
+		var hf: float = h
+		if hf > room_size.y - 0.12:
+			continue
+		var major: bool = is_equal_approx(hf, 1.0)
+		var col: Color = FRAME_COLOR if major else STRIPE_COLOR
+		var thick: float = 0.09 if major else 0.06
+		for sx in [-1.0, 1.0]:
+			_decal(
+				parent,
+				"HMark_%s_%d" % ["W" if sx < 0.0 else "E", int(hf * 10.0)],
+				Vector3(0.02, thick, length),
+				Vector3(sx * (half.x - 0.02), hf, 0.0),
+				col
+			)
 
 
 # --- 内部工具：带碰撞的方块 -------------------------------------------------
