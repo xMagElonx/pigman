@@ -8,6 +8,15 @@ extends CharacterBody3D
 ##
 ## 关于角色原点：本节点位于「脚底」，碰撞胶囊向上撑起身高。
 ## 所以 player.position.y = 0 就等于站在地面上。
+##
+## ── 三个方向参数的分工（2026-10-12 拆分，2026-10-13 补第三项）────
+## 速度快慢  = acceleration / deceleration
+## 方向快慢  = steer_rate_deg
+## 转向代价  = turn_speed_keep      ← 2026-10-13 新增，默认 1.0（= 关闭）
+##
+## 为什么要分三个：第 1 条「按下立刻动」要 acceleration 大，
+## 第 3 条「急转被甩出去」要 acceleration 小 —— 同一个参数方向相反。
+## 拆开之后它们才不打架。
 
 @export_group("速度")
 ## 慢走速度（米/秒）。先把这个调顺，再去动冲刺。
@@ -18,12 +27,35 @@ extends CharacterBody3D
 @export var acceleration := 45.0
 ## 松手后的减速速率。它比 acceleration 小，你就会有惯性。
 @export var deceleration := 28.0
+
+@export_group("转向")
 ## 转身速率（度 / 秒）。它只管「方向转得多快」，和 acceleration 是两件事。
-## 分开之后，才能同时做到「按下立刻起步」+「转身被甩出去」——
-## 这两件事如果挤在 acceleration 里，就会互相打架。
 ## 调大 = 指哪转哪（无惯性）；调小 = 转身要画个弧（有惯性）。
-## 720 ≈ 半秒转过 180°；2000 基本等于没有转向惯性。
-@export var steer_rate_deg := 720.0
+##
+## ⚠️ 它决定了「转身漂移」有多大，而且漂移量 ∝ 速度：
+##   转弯半径 R = 速度 ÷ (steer_rate 转成弧度/秒)
+##   横向漂移 = R × (1 - cos 转角)
+##   实测（冲刺 8.5 m/s、原地转 90°）：
+##     4000 → 约 0.11 m   基本等于指哪打哪
+##     2400 → 约 0.20 m   当前默认 ← 手感上已经等于「指哪走哪」
+##     1500 → 约 0.30 m   有一点重量
+##      720 → 约 0.61 m   明显能感觉到「被甩」（原来就是这个值）
+##      300 → 约 1.8 m    几乎像在冰上
+##
+## 为什么默认从 720 改成 2400：本项目已定下的规则是
+## **M1–M3 身体必须「听话」（白板基线，指哪打哪），M4 之后才引入别扭**。
+## 720 会让冲刺转身横滑 0.6 米 —— 那是 M4「移植后身体不听话」要做的事，
+## 不是基线该有的。想现在就尝那个手感？把滑条拖回 720 以下即可。
+@export var steer_rate_deg := 2400.0
+
+## 转向时的速度保留比例。1.0 = 转身不掉速（原来的行为）。
+##
+## 为什么要这个：原地转身时速度方向和朝向会分开，但速度**不减**，
+## 所以那不是「有重量」，是「磁悬浮侧滑」——它读起来像故障，不像惯性。
+## 把它拖到 0.5 附近，急转就会明显掉速，你才第一次感觉到身体有质量。
+##
+## 默认留 1.0（不改变你现有手感）—— 要不要开，由你在滑条上决定。
+@export var turn_speed_keep := 1.0
 
 @export_group("视角")
 ## 鼠标灵敏度。等价于计划书里写的 turn_response。
@@ -101,7 +133,18 @@ func _physics_process(delta: float) -> void:
 		var max_turn := deg_to_rad(steer_rate_deg) * delta
 		var angle := dir.signed_angle_to(wanted_dir, Vector3.UP)
 		dir = dir.rotated(Vector3.UP, clampf(angle, -max_turn, max_turn))
-		var cur := move_toward(horizontal.length(), speed, acceleration * delta)
+
+		# 转向的代价：转角越大，**目标**速度越低。
+		#
+		# 注意是改目标值，不是直接把当前速度乘一个系数 ——
+		# 转 90° 要花 8 帧，而那 8 帧里 angle 一直很大，
+		# 每帧乘一次就是复利，速度会崩到接近 0（那不叫掉速，叫刹车）。
+		# 改成目标值之后它是稳定的：转身期间稳定在 speed × turn_speed_keep。
+		var target_speed := speed
+		if turn_speed_keep < 0.999:
+			var turn_ratio := clampf(absf(angle) / (PI * 0.5), 0.0, 1.0)
+			target_speed = lerpf(speed, speed * turn_speed_keep, turn_ratio)
+		var cur := move_toward(horizontal.length(), target_speed, acceleration * delta)
 		horizontal = dir * cur
 	else:
 		# 松手：方向不再改变（这是惯性的来源之一），只让速度衰减。
@@ -116,3 +159,24 @@ func _physics_process(delta: float) -> void:
 ## 给调参面板用的实时读数。
 func horizontal_speed() -> float:
 	return Vector2(velocity.x, velocity.z).length()
+
+
+## 「速度方向」和「朝向」差了多少度。
+##
+## 这是本次修复的核心 —— 它是那个「莫名其妙的左右位移」的度量。
+##   0°  = 身体听话，指哪走哪。
+##   90° = 你转了，身体还在往原来的方向滑 —— 漂移正在发生。
+##
+## 为什么需要它：第一人称看不见自己的身体，所以「方向滞后」这件事
+## 完全不可见，只能靠感觉 —— 而感觉只会告诉你「有点怪」。
+## 有了这个数字，漂移就从「莫名其妙」变成「我知道它在发生」。
+## M4 移植之后要判断「身体是不是开始不听话了」，也全靠它。
+func steer_offset_deg() -> float:
+	var h := Vector3(velocity.x, 0.0, velocity.z)
+	if h.length() < 0.05:
+		return 0.0
+	var f := -global_transform.basis.z
+	f.y = 0.0
+	if f.length() < 0.001:
+		return 0.0
+	return rad_to_deg(h.normalized().angle_to(f.normalized()))

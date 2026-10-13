@@ -38,12 +38,16 @@ extends Node3D
 ## 靶子开关（0 = 隐藏，1 = 显示）。给面板用的，所以是 float。
 ## 需要单独验证移动手感时把它拖到 0。
 @export var dummy_switch := 1.0
+## 倒地后几秒自动站起来。0 = 不自动（只能按 R）。
+## ⚠️ M3 的真敌人要设为 0 —— 敌人不该复活。
+@export var dummy_auto_respawn := 2.5
 
 var _player: PlayerController
 var _weapon: MeleeWeapon
 var _tuner: TunerPanel
 var _dummies: Array[TargetDummy] = []
 var _last_dummy_switch := 1.0
+var _last_auto_respawn := 2.5
 
 
 func _ready() -> void:
@@ -77,18 +81,27 @@ func _process(_delta: float) -> void:
 		_last_dummy_switch = dummy_switch
 		_set_dummies_active(dummy_switch >= 0.5)
 
+	if not is_equal_approx(_last_auto_respawn, dummy_auto_respawn):
+		_last_auto_respawn = dummy_auto_respawn
+		for d in _dummies:
+			d.auto_respawn_delay = dummy_auto_respawn
+
 	var weapon_txt := "武器未装配"
 	if _weapon != null:
 		weapon_txt = "%s   %s" % [_weapon.stats(), _weapon.phase_name()]
 
+	# 「方向偏差」是 2026-10-13 加的：速度方向和朝向差多少度。
+	# 0° = 身体听话；转身时会瞬间飚到 90°~180° 再回落 ——
+	# 那个「莫名其妙的左右位移」第一次变成可读的数字。
 	_tuner.set_readout(
-		"%s\n速度 %.2f m/s   地面 %s   靶子 %s   FPS %d"
+		"%s\n速度 %.2f m/s   方向偏差 %.0f°   地面 %s   FPS %d\n靶子 %s"
 		% [
 			weapon_txt,
 			_player.horizontal_speed(),
+			_player.steer_offset_deg(),
 			"是" if _player.is_on_floor() else "否",
-			_dummy_hp_text(),
 			Engine.get_frames_per_second(),
+			_dummy_hp_text(),
 		]
 	)
 
@@ -96,7 +109,12 @@ func _process(_delta: float) -> void:
 func _dummy_hp_text() -> String:
 	var parts: PackedStringArray = []
 	for d in _dummies:
-		parts.append("%d/%d" % [d.hp, d.max_hp])
+		if d.down and d.auto_respawn_delay > 0.0:
+			parts.append("%.1fs 后复位" % maxf(0.0, d.auto_respawn_delay - d.down_timer()))
+		elif d.down:
+			parts.append("已倒 · 按 R")
+		else:
+			parts.append("%d/%d" % [d.hp, d.max_hp])
 	return " · ".join(parts)
 
 
@@ -226,6 +244,7 @@ func _build_dummies() -> void:
 		var d := TargetDummy.new()
 		d.name = "Dummy"
 		d.position = pos
+		d.auto_respawn_delay = dummy_auto_respawn
 		add_child(d)
 		_dummies.append(d)
 
@@ -238,31 +257,34 @@ func _build_tuner() -> void:
 	add_child(_tuner)
 
 	# 这一串就是你的「滑条」。新增参数时只加一行。
+	# 标签刻意压短 —— 面板是单行布局，太长会被裁掉。
 	var entries: Array = [
-		{"label": "walk_speed   慢走速度", "target": _player, "prop": "walk_speed", "min": 1.0, "max": 12.0, "step": 0.1},
-		{"label": "sprint_speed   冲刺速度", "target": _player, "prop": "sprint_speed", "min": 1.0, "max": 22.0, "step": 0.1},
-		{"label": "acceleration   加速度", "target": _player, "prop": "acceleration", "min": 2.0, "max": 150.0, "step": 1.0},
-		{"label": "deceleration   减速度", "target": _player, "prop": "deceleration", "min": 2.0, "max": 150.0, "step": 1.0},
-		{"label": "steer_rate_deg   转身速率 °/秒", "target": _player, "prop": "steer_rate_deg", "min": 60.0, "max": 2000.0, "step": 10.0},
-		{"label": "mouse_sensitivity   鼠标灵敏度", "target": _player, "prop": "mouse_sensitivity", "min": 0.0005, "max": 0.008, "step": 0.0001},
-		{"label": "pitch_limit_deg   抬头 / 低头上限", "target": _player, "prop": "pitch_limit_deg", "min": 30.0, "max": 89.0, "step": 1.0},
-		{"label": "eye_height   眼睛高度", "target": _player, "prop": "eye_height", "min": 1.0, "max": 2.2, "step": 0.01},
-		{"label": "gravity   重力", "target": _player, "prop": "gravity", "min": 0.0, "max": 60.0, "step": 0.5},
-		{"label": "jump_velocity   跳跃初速（0 = 不跳）", "target": _player, "prop": "jump_velocity", "min": 0.0, "max": 12.0, "step": 0.1},
+		{"label": "walk_speed  慢走", "target": _player, "prop": "walk_speed", "min": 1.0, "max": 12.0, "step": 0.1},
+		{"label": "sprint_speed  冲刺", "target": _player, "prop": "sprint_speed", "min": 1.0, "max": 22.0, "step": 0.1},
+		{"label": "acceleration  加速", "target": _player, "prop": "acceleration", "min": 2.0, "max": 150.0, "step": 1.0},
+		{"label": "deceleration  减速（惯性）", "target": _player, "prop": "deceleration", "min": 2.0, "max": 150.0, "step": 1.0},
+		{"label": "steer_rate_deg  转向 °/s", "target": _player, "prop": "steer_rate_deg", "min": 60.0, "max": 4000.0, "step": 10.0},
+		{"label": "turn_speed_keep  转身掉速", "target": _player, "prop": "turn_speed_keep", "min": 0.0, "max": 1.0, "step": 0.01},
+		{"label": "mouse_sensitivity  鼠标", "target": _player, "prop": "mouse_sensitivity", "min": 0.0005, "max": 0.008, "step": 0.0001},
+		{"label": "pitch_limit_deg  俯仰上限", "target": _player, "prop": "pitch_limit_deg", "min": 30.0, "max": 89.0, "step": 1.0},
+		{"label": "eye_height  眼高", "target": _player, "prop": "eye_height", "min": 1.0, "max": 2.2, "step": 0.01},
+		{"label": "gravity  重力", "target": _player, "prop": "gravity", "min": 0.0, "max": 60.0, "step": 0.5},
+		{"label": "jump_velocity  跳跃(0=不跳)", "target": _player, "prop": "jump_velocity", "min": 0.0, "max": 12.0, "step": 0.1},
 	]
 
 	if _weapon != null:
 		entries.append_array([
-			{"label": "─ 挥击 · 前摇 windup s", "target": _weapon, "prop": "windup", "min": 0.0, "max": 0.5, "step": 0.01},
-			{"label": "─ 挥击 · 命中窗口 active s", "target": _weapon, "prop": "active", "min": 0.02, "max": 0.40, "step": 0.01},
-			{"label": "─ 挥击 · 后摇 recovery s", "target": _weapon, "prop": "recovery", "min": 0.05, "max": 0.80, "step": 0.01},
-			{"label": "─ 挥击 · 扫掠角 °", "target": _weapon, "prop": "swing_angle_deg", "min": 30.0, "max": 200.0, "step": 5.0},
-			{"label": "─ 反馈 · 顿帧 hitstop s", "target": _weapon, "prop": "hitstop", "min": 0.0, "max": 0.20, "step": 0.005},
-			{"label": "─ 反馈 · 屏震 shake m", "target": _weapon, "prop": "shake_strength", "min": 0.0, "max": 0.15, "step": 0.005},
+			{"label": "│ 前摇 windup s", "target": _weapon, "prop": "windup", "min": 0.0, "max": 0.5, "step": 0.01},
+			{"label": "│ 命中窗口 active s", "target": _weapon, "prop": "active", "min": 0.02, "max": 0.40, "step": 0.01},
+			{"label": "│ 后摇 recovery s", "target": _weapon, "prop": "recovery", "min": 0.05, "max": 0.80, "step": 0.01},
+			{"label": "│ 扫掠角 °", "target": _weapon, "prop": "swing_angle_deg", "min": 30.0, "max": 200.0, "step": 5.0},
+			{"label": "│ 顿帧 hitstop s", "target": _weapon, "prop": "hitstop", "min": 0.0, "max": 0.20, "step": 0.005},
+			{"label": "│ 屏震 shake m", "target": _weapon, "prop": "shake_strength", "min": 0.0, "max": 0.15, "step": 0.005},
 		])
 
 	entries.append_array([
-		{"label": "─ 靶子开关（0 关 / 1 开）", "target": self, "prop": "dummy_switch", "min": 0.0, "max": 1.0, "step": 1.0},
+		{"label": "│ 靶子开关 0/1", "target": self, "prop": "dummy_switch", "min": 0.0, "max": 1.0, "step": 1.0},
+		{"label": "│ 靶子自动复位 sec", "target": self, "prop": "dummy_auto_respawn", "min": 0.0, "max": 10.0, "step": 0.5},
 	])
 
 	_tuner.setup(entries, "挥击 0 · 命中 0   待机")

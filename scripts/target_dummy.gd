@@ -19,12 +19,24 @@ extends StaticBody3D
 ##   3. M3 敌人的底座 —— 敌人将来就在这个文件上长出状态机
 ##
 ## 它做的唯一一件事：被打，然后有反应。
+##
+## ── 2026-10-13 修复 ──────────────────────────────────────────────
+## 修一：倒地后**关闭碰撞**。原来只让视觉倒下、碰撞胶囊还立着，
+##       于是「尸体会挡路」—— 你看不见它，但会被它撞停。
+## 修二：新增**自动复位**。练习靶本来就该自己站起来；
+##       不然杀掉它之后，你就少了一个可测的对象。
 
 signal hit_received(point: Vector3, dir: Vector3, speed: float, hp_left: int)
 
 @export_group("抵抗")
 ## 挨几下倒地。设大一点方便你反复测同一件事。
 @export var max_hp := 6
+
+@export_group("复位")
+## 倒地后几秒自动站起来。0 = 不自动（手动按 R）。
+## ⚠️ M3 的真敌人请设为 0 —— 敌人不该复活。
+@export var auto_respawn_delay := 2.5
+
 @export_group("受击反应")
 ## 后仰角度（度）。这是「打击感」里最便宜也最有效的一半 —— 目标动了，你的力才存在。
 @export var tilt_deg := 13.0
@@ -49,11 +61,23 @@ var _tilt_axis := Vector3.RIGHT
 var _tilt_amount := 0.0
 var _tween: Tween
 var _flash_tween: Tween
+var _down_timer := 0.0
+var _active := true
 
 
 func _ready() -> void:
 	_build()
 	respawn()
+
+
+func _process(delta: float) -> void:
+	if not down:
+		return
+	if auto_respawn_delay <= 0.0:
+		return
+	_down_timer += delta
+	if _down_timer >= auto_respawn_delay:
+		respawn()
 
 
 # --- 组装 -------------------------------------------------------------------
@@ -75,6 +99,8 @@ func _build() -> void:
 
 	# 一整根胶囊当碰撞体 —— 刀的扫掠只要碰到这一个形状就够。
 	# 分部位碰撞是 M4 断肢的事，现在做了只会让你分不清「没打中」和「打中了别的部位」。
+	# 注意：它挂在**自己**身上而不是 Pivot 上，所以视觉倒地时它不会跟着倒 ——
+	# 这正是「倒地要手动关掉它」的原因。
 	_col = CollisionShape3D.new()
 	_col.name = "Collision"
 	var cap := CapsuleShape3D.new()
@@ -176,6 +202,10 @@ func _set_flash_energy(v: float) -> void:
 
 func _fall() -> void:
 	down = true
+	_down_timer = 0.0
+	# 关键：碰撞要跟着一起关。只让视觉倒下，会留下一根看不见的柱子把你撞停。
+	if _col != null:
+		_col.disabled = true
 	if _tween != null and _tween.is_valid():
 		_tween.kill()
 	_tween = create_tween()
@@ -192,18 +222,21 @@ func _clear_tween_ref() -> void:
 
 # --- 复位 -------------------------------------------------------------------
 
-## 按 R 复位全部靶子。别让它留在倒地的状态里 —— 那样你就少了一个可测的对象。
+## 站起来。按 R 会立刻调用它；auto_respawn_delay > 0 时也会被自动调用。
 func respawn() -> void:
 	if _tween != null and _tween.is_valid():
 		_tween.kill()
 	if _flash_tween != null and _flash_tween.is_valid():
 		_flash_tween.kill()
 	down = false
+	_down_timer = 0.0
 	hp = max_hp
 	_tilt_amount = 0.0
 	if _pivot != null:
 		_pivot.basis = Basis()
 		_pivot.position = Vector3.ZERO
+	if _col != null:
+		_col.disabled = not _active
 	for m in _mats:
 		m.emission_energy_multiplier = 0.0
 
@@ -211,6 +244,12 @@ func respawn() -> void:
 ## 面板上的「靶子开关」用这个：隐藏时连碰撞一起关掉。
 ## 只设 visible 是不够的 —— 你会撞上一个看不见的墙，那比不做开关更糟。
 func set_active(v: bool) -> void:
+	_active = v
 	visible = v
 	if _col != null:
-		_col.disabled = not v
+		_col.disabled = (not v) or down
+
+
+## 给面板读数用的倒计时。
+func down_timer() -> float:
+	return _down_timer
