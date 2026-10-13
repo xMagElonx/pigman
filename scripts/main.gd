@@ -651,6 +651,14 @@ func _tuner_entries() -> Array:
 		{"label": "│ 靶子自动复位 sec", "target": self, "prop": "dummy_auto_respawn", "min": 0.0, "max": 10.0, "step": 0.5},
 	])
 
+	# 音效音量（探索卡 §5 列的「音效音量」入口）。
+	# target 是 autoload `Sfx` —— TuningStore 会把它归到 world 组，
+	# 键名 master_db 在整棵树上唯一，不与刀身/柄/靶子撞名。
+	# 没有音色文件时它是「静音也没关系」的状态，见 scripts/sfx.gd。
+	entries.append_array([
+		{"label": "│ 音效音量 dB", "target": Sfx, "prop": "master_db", "min": -40.0, "max": 6.0, "step": 1.0},
+	])
+
 	return entries
 
 

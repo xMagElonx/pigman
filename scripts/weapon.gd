@@ -263,6 +263,9 @@ func _advance(delta: float) -> void:
 				# 一次挥击开始时清空 —— 这一行就是「不会多帧重复结算」的全部实现。
 				_hit_this_swing.clear()
 				_has_prev = false
+				# 破空声落点：WINDUP → ACTIVE，与「命中窗口」同一时刻。
+				# 这一步之后才可能命中，于是命中时是 whoosh + hit **两层叠在一起**。
+				_play_swing_sound()
 		Phase.ACTIVE:
 			if _t >= active:
 				_phase = Phase.RECOVERY
@@ -405,15 +408,28 @@ func _update_shake(delta: float) -> void:
 		_camera.position = Vector3.ZERO
 
 
-## 声音钩子 —— 归你填。挥空那一下。
+## 声音钩子 —— **接线已由 AI 做好，你只需要把音色文件放进 `assets/audio/`**。
+##
+## 这两个函数就是「哪一刻响」的全部。文件名见 assets/audio/README.md。
+## 没有文件时会静默跳过（不崩、不报错），所以现在直接跑也没问题 ——
+## 「先接线、后录音」是安全的。
+##
+## 落点说明：本函数在 `_advance()` 的 **WINDUP → ACTIVE** 转换处被调用，
+## 也就是「挥出去、开始能打中」的那一帧 —— 不是抬手的瞬间。
+##
+## 挥空那一下：短、亮、**不要低频**。
 func _play_swing_sound() -> void:
-	pass
+	Sfx.play(&"sfx_swing_whoosh")
 
 
-## 声音钩子 —— 归你填。切中那一下。
-## 「闭眼也能分辨切中与挥空」这条验收，全部押在这个函数上。
+## 切中那一下：骤停、暗、**要有低频冲击**。
+##
+## ⚠️ M2 的验收「闭眼也能分辨切中与挥空」**全部押在两条音色的对比上**：
+##     挥空 = 只有 whoosh（一层风）
+##     命中 = whoosh + 本音（两层：风 + 撞）
+##   所以 whoosh 每次必须完全一致（不许随机音高），否则叠层就分辨不出来。
 func _play_hit_sound() -> void:
-	pass
+	Sfx.play(&"sfx_swing_hit")
 
 
 # --- 读数 -------------------------------------------------------------------
