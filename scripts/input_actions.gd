@@ -16,12 +16,18 @@ const ACTIONS := {
 	"move_left":     {"keys": [KEY_A, KEY_LEFT]},
 	"move_right":    {"keys": [KEY_D, KEY_RIGHT]},
 	"sprint":        {"keys": [KEY_SHIFT]},
+	"jump":          {"keys": [KEY_SPACE]},
 	"toggle_panel":  {"keys": [KEY_TAB]},
 	"attack":        {"buttons": [MOUSE_BUTTON_LEFT]},
 	"reset_dummies": {"keys": [KEY_R]},
 }
 
 ## Esc 释放鼠标用的是 Godot 内置的 ui_cancel，不需要在这里注册。
+##
+## 跳跃也**不用** ui_accept —— 那个键同时兼任 UI 的「确认」，
+## 而且它不可见（Godot 内置），拖动 jump_velocity 滑条的人
+## 在屏幕上找不到任何「按什么键跳」的线索。
+## 起一个自己的 jump 动作，好处是它出现在这张表里 —— 可搜索、可改、跟 Git 走。
 
 
 static func ensure() -> void:

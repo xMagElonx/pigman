@@ -16,6 +16,18 @@ extends Node3D
 ## 它们是空的，不是我忘了 —— 声音是《猪人》的签名，属于作者性，不该由 AI 塞占位素材。
 ## 但这意味着 M2 那条「闭眼也能分辨切中与挥空」的验收，在你填进自己的声音之前，
 ## 只能靠顿帧和屏震裸考 —— 大概率过不了。这是设计，不是缺陷。
+##
+## ── 2026-10-14 修复：命中形状与刀身对不上 ────────────────────────
+## 症状：看着砍到了，却经常判不到。
+## 原因（自检实测）：原来是一个 **半径 0.42 的球、圆心走在刀身中点**。
+##     视觉刀尖 1.235 m  →  检测最远 1.080 m  →  **尖端 15.5 cm 是断的**
+##   而且反过来，球在横向足足有 ±0.42 m 宽 —— 比刀刃实际厚度（0.085 m）
+##   胖了约 10 倍，所以同时存在「够不着」和「隔空砍中」两种错，方向相反。
+## 修法：形状换成**沿刀身的胶囊**，长度直接取自 Blade 网格的 size。
+##   从此「模型改了但碰撞箱没改」这件事在结构上不可能再发生 ——
+##   因为碰撞箱是**从模型算出来的**，不是另写一份。
+##
+## 一句话记法：**碰撞箱不应该是一个数字，应该是模型的一个函数。**
 
 signal hit_landed(target: Object, point: Vector3, speed: float)
 
@@ -33,9 +45,24 @@ enum Phase { IDLE, WINDUP, ACTIVE, RECOVERY }
 @export_group("形状")
 ## 一次挥击扫过的角度。90 以下像戳，150 以上像抡。
 @export var swing_angle_deg := 110.0
-## 扫掠用的球半径（米）。它相当于「刀的厚度 + 容错」。
-## 太小 → 明明看着砍到了却没算中；太大 → 隔空砍中。
-@export var hit_radius := 0.42
+
+## 刀刃的**容错半径**（米）。检测形状是沿刀身的胶囊，这就是它的半径。
+##
+## 它该有多大：刀刃实际半厚约 0.043 m（刀身厚 0.085），
+## 再留一点手感容错 —— 0.07 意味着「差一点点擦到也算中」，横向总宽 0.14 m。
+##   拖到 0.02 → 只认真正的刀刃，手感很「硬」，容易擦身而过判不到。
+##   拖到 0.20 → 隔空砍中，你会开始怀疑「我明明没碰到它」。
+## ⚠️ 它同时是检测**长度**上多出来的那一点点（两端各加一个半径）。
+@export var blade_radius := 0.07:
+	set(value):
+		blade_radius = value
+		_rebuild_shape()
+
+## 刀身长度（米）。**不要手填** —— 由 main.gd 从 Blade 网格的 size 读出来注入。
+## 它存在的唯一理由是让「碰撞箱 = 模型的函数」这句话成立。
+var blade_length := 1.15
+## 刀身中点距手腕的距离（米）。同上，由模型注入。
+var blade_center := 0.66
 
 @export_group("反馈")
 ## 顿帧时长（秒）。命中瞬间世界几乎停住 —— 这是最重要的一味料。
@@ -69,6 +96,7 @@ func _ready() -> void:
 	_pivot = get_node_or_null("Pivot")
 	_blade_mid = get_node_or_null("Pivot/BladeMid") as Marker3D
 	_shapecast = get_node_or_null("Pivot/ShapeCast3D") as ShapeCast3D
+	_rebuild_shape()
 
 	# 刀不能砍到自己：把第一个 CharacterBody3D 祖先排除掉。
 	if _shapecast != null:
@@ -77,6 +105,30 @@ func _ready() -> void:
 			n = n.get_parent()
 		if n != null:
 			_shapecast.add_exception(n)
+
+
+## 按当前 blade_length / blade_radius 重建检测形状。
+## 谁改了刀刃尺寸都会调它 —— 滑条拖动时形状会立刻跟着变。
+func _rebuild_shape() -> void:
+	if _shapecast == null:
+		return
+	var cap := CapsuleShape3D.new()
+	cap.radius = maxf(0.005, blade_radius)
+	# Godot 的 capsule height 是**总高**（含两端半球），
+	# 所以要覆盖 blade_length 长的刀身、两端各留一个 radius 的容错：
+	cap.height = maxf(blade_length, cap.radius * 2.0 + 0.001) + cap.radius * 2.0
+	_shapecast.shape = cap
+
+
+## 检测最远能到哪（距手腕，米）。视觉刀尖 + 一个容错半径。
+## 自检和读数用它来核对「模型」和「碰撞箱」是否还对齐。
+func reach() -> float:
+	return blade_center + blade_length * 0.5 + blade_radius
+
+
+## 视觉刀尖距手腕（米）。它必须永远等于 reach() − blade_radius。
+func visual_tip() -> float:
+	return blade_center + blade_length * 0.5
 
 
 func _physics_process(delta: float) -> void:
@@ -152,7 +204,7 @@ func _ease_out(p: float) -> float:
 # --- 命中检测 ---------------------------------------------------------------
 
 func _detect(delta: float) -> void:
-	if _blade_mid == null or _shapecast == null:
+	if _blade_mid == null or _shapecast == null or _shapecast.shape == null:
 		return
 
 	var mid := _blade_mid.global_position
@@ -163,9 +215,16 @@ func _detect(delta: float) -> void:
 
 	# 从「上一帧刀身中点」扫到「这一帧刀身中点」——
 	# 这样高速挥砍也不会穿过一个薄目标（隧道效应）。
+	#
+	# ⚠️ 2026-10-14 修正：这里曾经是
+	#     _shapecast.global_transform = Transform3D(Basis(), _prev_mid)
+	#     _shapecast.target_position = seg
+	#   那样写会把形状的旋转重置成 identity。以前形状是**球**，球没有朝向，
+	#   所以看不出问题；换成沿刀身的胶囊之后，那样写会让胶囊**永远竖着**，
+	#   等于又错一次。正确做法是：**不动节点**（它挂在 Pivot 下，朝向自动跟随刀身），
+	#   只把世界位移转进节点自己的局部空间 —— 因为 target_position 是局部坐标。
 	var seg := mid - _prev_mid
-	_shapecast.global_transform = Transform3D(Basis(), _prev_mid)
-	_shapecast.target_position = seg
+	_shapecast.target_position = _shapecast.global_transform.basis.inverse() * (-seg)
 	_shapecast.force_shapecast_update()
 
 	var count := _shapecast.get_collision_count()

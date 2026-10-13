@@ -72,8 +72,23 @@ extends CharacterBody3D
 			_head.position.y = value
 ## 重力。灰盒阶段由你手填，方便先调下落手感。
 @export var gravity := 24.0
-## 跳跃初速度。默认 0 = 不能跳。
-## 计划书里没有跳跃 —— 先确认地面移动本身成立，再决定要不要给它。
+
+## 跳跃初速度（米/秒）。**默认 0 = 不跳 —— 这是刻意的，不是 bug。**
+##
+## 为什么默认关（2026-10-14 说明）：
+##   计划书 v0.2 里没有跳跃。M1–M3 要验证的是「地面移动 + 挥砍」，
+##   跳跃会往手感里塞进第四个变量：你分不清一次「砍空了」
+##   是因为跑位不对，还是因为你人在空中、刀的高度变了。
+##   所以它默认关着，等你明确需要它时再开。
+##
+## 怎么开：把面板上这一条拖到非 0 即可（比如 6.0），然后按 **空格**。
+##   跳跃高度 ≈ v² / (2 × gravity)
+##     gravity = 24 时：v=4 → 0.33 m   v=6 → 0.75 m   v=8 → 1.33 m
+##   面板读数里会直接显示当前值对应的高度，不用自己算。
+##
+## ⚠️ 2026-10-14 之前，它绑的是 Godot 内置的 ui_accept，
+##    而屏幕上从来没有写过「按什么键跳」—— 于是拖了滑条也看不出反应。
+##    现在它是一个独立动作 jump（空格），并且写进了屏幕提示和面板标签。
 @export var jump_velocity := 0.0
 
 var _head: Node3D
@@ -112,7 +127,7 @@ func _physics_process(delta: float) -> void:
 	if not is_on_floor():
 		velocity.y -= gravity * delta
 
-	if is_on_floor() and jump_velocity > 0.0 and Input.is_action_just_pressed("ui_accept"):
+	if is_on_floor() and jump_velocity > 0.0 and Input.is_action_just_pressed("jump"):
 		velocity.y = jump_velocity
 
 	# 输入：x = 左右，y = 前后（前进为 -1）
@@ -154,6 +169,14 @@ func _physics_process(delta: float) -> void:
 	velocity.z = horizontal.z
 
 	move_and_slide()
+
+
+## 当前 jump_velocity 对应的理论跳跃高度（米）。给面板读数用的 ——
+## 拖滑条时能立刻看见「这个数字意味着跳多高」，不用自己算 v²/2g。
+func jump_height() -> float:
+	if jump_velocity <= 0.0:
+		return 0.0
+	return jump_velocity * jump_velocity / (2.0 * maxf(gravity, 0.001))
 
 
 ## 给调参面板用的实时读数。

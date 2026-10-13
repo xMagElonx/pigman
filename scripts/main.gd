@@ -14,6 +14,12 @@ extends Node3D
 ##   deceleration 太小 → 你冲过头，刀从它旁边划过去
 ##   steer_rate 太大  → 你没法在转身时把刀留在它身上
 ## 这三个信号，空房间里一个都测不出来。
+##
+## ── 2026-10-14 三处改动 ──────────────────────────────────────────
+##   ① 刀身尺寸抽成常量 BLADE_SIZE / BLADE_CENTER_Z，
+##      模型和命中碰撞箱**共用同一个来源** → 两者不可能再对不上。
+##   ② 参数持久化：启动时读 user://tuning.cfg，面板改动 0.6 秒后自动写回。
+##   ③ 跳跃从借用的 ui_accept 改成独立的 jump 动作（空格），并显示跳跃高度。
 
 @export_group("房间")
 ## 房间尺寸（米）。改这里，整个灰盒会按新尺寸重建。
@@ -42,12 +48,19 @@ extends Node3D
 ## ⚠️ M3 的真敌人要设为 0 —— 敌人不该复活。
 @export var dummy_auto_respawn := 2.5
 
+# ── 刀的身材。只在这里写一次，模型和碰撞箱都从它来。──────────────
+# 改这里 = 同时改模型和命中范围，永远不会出现「看着更长、判定更短」。
+const BLADE_SIZE := Vector3(0.085, 0.028, 1.15)
+## 刀身中点相对手腕（Pivot）的 z 偏移。负数 = 朝前。
+const BLADE_CENTER_Z := -0.66
+
 var _player: PlayerController
 var _weapon: MeleeWeapon
 var _tuner: TunerPanel
 var _dummies: Array[TargetDummy] = []
 var _last_dummy_switch := 1.0
 var _last_auto_respawn := 2.5
+var _tuning_entries: Array = []
 
 
 func _ready() -> void:
@@ -56,10 +69,22 @@ func _ready() -> void:
 	Graybox.build(self, room_size, with_ceiling, floor_stripes, door_width, door_height)
 	_player = _build_player()
 	_build_weapon()
+
+	# 调参值必须在**建靶子之前**载入 —— 因为 dummy_auto_respawn 会被
+	# 传进每个靶子，晚了这一步，靶子用的就还是代码初值。
+	_tuning_entries = _tuner_entries()
+	TuningStore.capture_defaults(_tuning_entries)
+	var loaded := TuningStore.load_into(_tuning_entries, TuningStore.AUTO_PATH)
+
 	_build_dummies()
 	_build_tuner()
+
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	print("[PIGMAN M0/M1/M2] WASD 移动 · Shift 冲刺 · 鼠标左键 挥砍 · R 复位靶子 · Tab 调参面板 · Esc 释放鼠标")
+	print("[PIGMAN M0/M1/M2] WASD 移动 · Shift 冲刺 · 鼠标左键 挥砍 · 空格 跳跃(默认关) · R 复位靶子 · Tab 调参面板 · Esc 释放鼠标")
+	if loaded > 0:
+		print("[调参] 已从 %s 载入 %d 项" % [TuningStore.human_path(TuningStore.AUTO_PATH), loaded])
+	else:
+		print("[调参] 没有存档，使用代码默认值。改动会自动存到 %s" % TuningStore.human_path(TuningStore.AUTO_PATH))
 
 
 func _input(event: InputEvent) -> void:
@@ -94,16 +119,27 @@ func _process(_delta: float) -> void:
 	# 0° = 身体听话；转身时会瞬间飚到 90°~180° 再回落 ——
 	# 那个「莫名其妙的左右位移」第一次变成可读的数字。
 	_tuner.set_readout(
-		"%s\n速度 %.2f m/s   方向偏差 %.0f°   地面 %s   FPS %d\n靶子 %s"
+		"%s    臂展 %.2f m\n速度 %.2f m/s   方向偏差 %.0f°   地面 %s   %s   FPS %d\n靶子 %s"
 		% [
 			weapon_txt,
+			_weapon.reach() if _weapon != null else 0.0,
 			_player.horizontal_speed(),
 			_player.steer_offset_deg(),
 			"是" if _player.is_on_floor() else "否",
+			_jump_text(),
 			Engine.get_frames_per_second(),
 			_dummy_hp_text(),
 		]
 	)
+
+
+## 跳跃那一格读数。
+## jump_velocity = 0 时明确告诉玩家「怎么开」—— 之前这个信息只存在于代码里，
+## 屏幕上什么都没有，于是「拖了滑条没反应」看起来就像个 bug。
+func _jump_text() -> String:
+	if _player.jump_velocity <= 0.0:
+		return "跳跃 未开"
+	return "跳高 %.2f m" % _player.jump_height()
 
 
 func _dummy_hp_text() -> String:
@@ -196,28 +232,32 @@ func _build_weapon() -> void:
 	pivot.position = Vector3(0.30, -0.22, -0.12)
 	_weapon.add_child(pivot)
 
-	var handle := _mesh_box("Handle", Vector3(0.05, 0.05, 0.22), Vector3(0.0, 0.0, 0.07), Color(0.16, 0.15, 0.17))
-	pivot.add_child(handle)
+	pivot.add_child(_mesh_box("Handle", Vector3(0.05, 0.05, 0.22), Vector3(0.0, 0.0, 0.07), Color(0.16, 0.15, 0.17)))
+	pivot.add_child(_mesh_box("Guard", Vector3(0.24, 0.05, 0.05), Vector3(0.0, 0.0, -0.03), Color(0.36, 0.34, 0.37)))
 
-	var guard := _mesh_box("Guard", Vector3(0.24, 0.05, 0.05), Vector3(0.0, 0.0, -0.03), Color(0.36, 0.34, 0.37))
-	pivot.add_child(guard)
-
-	var blade := _mesh_box("Blade", Vector3(0.085, 0.028, 1.15), Vector3(0.0, 0.0, -0.66), Color(0.80, 0.82, 0.86))
-	pivot.add_child(blade)
+	# 刀身：尺寸来自常量 —— 和下面的命中形状是同一份数据。
+	pivot.add_child(_mesh_box("Blade", BLADE_SIZE, Vector3(0.0, 0.0, BLADE_CENTER_Z), Color(0.80, 0.82, 0.86)))
 
 	# 刀身中点。扫掠检测以它为参照 —— 它比刀尖更代表「刀在哪」。
 	var mid := Marker3D.new()
 	mid.name = "BladeMid"
-	mid.position = Vector3(0.0, 0.0, -0.66)
+	mid.position = Vector3(0.0, 0.0, BLADE_CENTER_Z)
 	pivot.add_child(mid)
 
+	# 命中形状的载体。它挂在 Pivot 下、位置在刀身中点、绕 X 转 -90°，
+	# 于是它自身的 Y 轴正好指向刀尖方向 —— **朝向自动跟随挥砍，不用手写**。
+	# 形状本身（胶囊）由 MeleeWeapon._rebuild_shape() 按 blade_length 生成。
 	var sc := ShapeCast3D.new()
 	sc.name = "ShapeCast3D"
-	var sphere := SphereShape3D.new()
-	sphere.radius = _weapon.hit_radius
-	sc.shape = sphere
+	sc.position = Vector3(0.0, 0.0, BLADE_CENTER_Z)
+	sc.rotation = Vector3(-PI * 0.5, 0.0, 0.0)
 	sc.target_position = Vector3.ZERO
 	pivot.add_child(sc)
+
+	# 把刀身的真实尺寸交给武器 —— 这是「碰撞箱 = 模型的函数」的那一次传递。
+	# 必须在 add_child 之前设，因为 _ready() 里会立刻按它生成形状。
+	_weapon.blade_length = BLADE_SIZE.z
+	_weapon.blade_center = absf(BLADE_CENTER_Z)
 
 	head.add_child(_weapon)
 
@@ -251,12 +291,9 @@ func _build_dummies() -> void:
 
 # --- 调参面板 ---------------------------------------------------------------
 
-func _build_tuner() -> void:
-	_tuner = TunerPanel.new()
-	_tuner.name = "TunerPanel"
-	add_child(_tuner)
-
-	# 这一串就是你的「滑条」。新增参数时只加一行。
+## 面板内容。抽成独立函数，是因为「载入存档」需要**在面板建好之前**拿到
+## 这份清单（否则滑条会拿着旧值初始化）。
+func _tuner_entries() -> Array:
 	# 标签刻意压短 —— 面板是单行布局，太长会被裁掉。
 	var entries: Array = [
 		{"label": "walk_speed  慢走", "target": _player, "prop": "walk_speed", "min": 1.0, "max": 12.0, "step": 0.1},
@@ -269,11 +306,12 @@ func _build_tuner() -> void:
 		{"label": "pitch_limit_deg  俯仰上限", "target": _player, "prop": "pitch_limit_deg", "min": 30.0, "max": 89.0, "step": 1.0},
 		{"label": "eye_height  眼高", "target": _player, "prop": "eye_height", "min": 1.0, "max": 2.2, "step": 0.01},
 		{"label": "gravity  重力", "target": _player, "prop": "gravity", "min": 0.0, "max": 60.0, "step": 0.5},
-		{"label": "jump_velocity  跳跃(0=不跳)", "target": _player, "prop": "jump_velocity", "min": 0.0, "max": 12.0, "step": 0.1},
+		{"label": "jump_velocity  跳跃(空格)", "target": _player, "prop": "jump_velocity", "min": 0.0, "max": 12.0, "step": 0.1},
 	]
 
 	if _weapon != null:
 		entries.append_array([
+			{"label": "│ 刀刃容错 radius m", "target": _weapon, "prop": "blade_radius", "min": 0.02, "max": 0.30, "step": 0.005},
 			{"label": "│ 前摇 windup s", "target": _weapon, "prop": "windup", "min": 0.0, "max": 0.5, "step": 0.01},
 			{"label": "│ 命中窗口 active s", "target": _weapon, "prop": "active", "min": 0.02, "max": 0.40, "step": 0.01},
 			{"label": "│ 后摇 recovery s", "target": _weapon, "prop": "recovery", "min": 0.05, "max": 0.80, "step": 0.01},
@@ -287,4 +325,11 @@ func _build_tuner() -> void:
 		{"label": "│ 靶子自动复位 sec", "target": self, "prop": "dummy_auto_respawn", "min": 0.0, "max": 10.0, "step": 0.5},
 	])
 
-	_tuner.setup(entries, "挥击 0 · 命中 0   待机")
+	return entries
+
+
+func _build_tuner() -> void:
+	_tuner = TunerPanel.new()
+	_tuner.name = "TunerPanel"
+	add_child(_tuner)
+	_tuner.setup(_tuning_entries, "挥击 0 · 命中 0   待机")
