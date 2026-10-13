@@ -59,9 +59,29 @@ extends Node3D
 
 # ── 刀的身材。只在这里写一次，模型和碰撞箱都从它来。──────────────
 # 改这里 = 同时改模型和命中范围，永远不会出现「看着更长、判定更短」。
-const BLADE_SIZE := Vector3(0.085, 0.028, 1.15)
+#
+# ── 2026-10-14 晚：换成屠刀（cleaver）原型 ───────────────────────
+# 从「细长的直刀」（0.085 厚 × 0.028 宽 × 1.15 长）改成「短、宽、厚背的屠刀」。
+# 三处形状差异，每一处都有理由：
+#
+#   ① **刀身平面竖起来了** —— 现在是 x=刀厚（左右 4 cm）/ y=刀宽（上下 16.5 cm）。
+#      之前刀是「平躺」的，你从上往下只看得到一条细线。
+#      竖起来之后，刀宽的那一面正对着你的眼睛 ——
+#      你才**看得见「刃在哪一边」**。而「刃在哪一边」是四向攻击的前提：
+#      如果连哪边是刃都看不出来，四向就只是四个不同的动画。
+#
+#   ② 多了**背脊**和**刃口**两条（在 _build_weapon 里）。
+#      真实屠刀是**单边开刃**：一边厚、一边薄。这意味着这把刀**自己带一个方向**，
+#      不需要额外做 UI 去指示方向 —— 刀的形状本身就是指示器。
+#
+#   ③ **变短了**（1.15 → 0.80）。这一条是唯一会改变玩法的：
+#      臂展从 1.31 m 缩到约 0.96 m（按你存档里的 blade_radius 算是 1.01 m）。
+#      你必须**贴得更近**才能砍到。这是刻意的 —— 屠刀是重工具，不是长剑。
+#      ⚠️ 嫌短就把下面的 0.80 调大，模型和碰撞箱会一起变（它们共用这一份数据）。
+const BLADE_SIZE := Vector3(0.040, 0.165, 0.80)
 ## 刀身中点相对手腕（Pivot）的 z 偏移。负数 = 朝前。
-const BLADE_CENTER_Z := -0.66
+## 算法：刀根固定在腕前 0.085，所以中点 = -(0.085 + 刀长/2)。
+const BLADE_CENTER_Z := -0.485
 
 var _player: PlayerController
 var _weapon: MeleeWeapon
@@ -251,11 +271,21 @@ func _build_weapon() -> void:
 	pivot.position = Vector3(0.30, -0.22, -0.12)
 	_weapon.add_child(pivot)
 
-	pivot.add_child(_mesh_box("Handle", Vector3(0.05, 0.05, 0.22), Vector3(0.0, 0.0, 0.07), Color(0.16, 0.15, 0.17)))
-	pivot.add_child(_mesh_box("Guard", Vector3(0.24, 0.05, 0.05), Vector3(0.0, 0.0, -0.03), Color(0.36, 0.34, 0.37)))
+	# 柄：屠刀是工具，柄粗、长（能双手攥）。颜色偏木/胶的暗调。
+	pivot.add_child(_mesh_box("Handle", Vector3(0.048, 0.052, 0.30), Vector3(0.0, 0.0, 0.10), Color(0.14, 0.13, 0.15)))
+	# 挡片：屠刀没有十字护手，只有一块挡住手的小铁片。
+	pivot.add_child(_mesh_box("Collar", Vector3(0.062, 0.10, 0.035), Vector3(0.0, 0.0, -0.052), Color(0.34, 0.32, 0.35)))
 
 	# 刀身：尺寸来自常量 —— 和下面的命中形状是同一份数据。
-	pivot.add_child(_mesh_box("Blade", BLADE_SIZE, Vector3(0.0, 0.0, BLADE_CENTER_Z), Color(0.80, 0.82, 0.86)))
+	pivot.add_child(_mesh_box("Blade", BLADE_SIZE, Vector3(0.0, 0.0, BLADE_CENTER_Z), Color(0.72, 0.74, 0.78)))
+
+	# 屠刀的两个特征部位。它们**不参与命中判定**（判定是沿刀身的一条胶囊），
+	# 存在的唯一理由是让你一眼看出**刃在哪一边**：
+	#   上缘那根更厚的 = 背脊（刀背）    下缘那根更薄的 = 刃口
+	pivot.add_child(_mesh_box("Spine", Vector3(0.056, 0.026, BLADE_SIZE.z),
+		Vector3(0.0, BLADE_SIZE.y * 0.5 - 0.013, BLADE_CENTER_Z), Color(0.46, 0.47, 0.50)))
+	pivot.add_child(_mesh_box("Edge", Vector3(0.014, 0.016, BLADE_SIZE.z),
+		Vector3(0.0, -BLADE_SIZE.y * 0.5 + 0.008, BLADE_CENTER_Z), Color(0.95, 0.96, 0.99)))
 
 	# 刀身中点。扫掠检测以它为参照 —— 它比刀尖更代表「刀在哪」。
 	var mid := Marker3D.new()
