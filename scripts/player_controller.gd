@@ -105,6 +105,39 @@ extends CharacterBody3D
 ##    现在它是一个独立动作 jump（空格），并且写进了屏幕提示和面板标签。
 @export var jump_velocity := 7.0
 
+@export_group("空中")
+## 空中的操控权。**0 = 纯弹道，1 = 和地面一样灵活。默认 0。**
+##
+## ── 为什么需要这个参数（2026-10-14 晚，由用户实测提出）──────────
+## 改之前的写法对地面和空中**一视同仁** —— 于是跳起来之后，
+## 你还能像站在地上一样自由地左右前后改向。那不是跳跃，
+## 那是**喷气背包**：它把「跳」这个动作的后果抹掉了，
+## 起跳时的方向、速度、时机全部不再重要。
+##
+## ── 它同时作用于三件事（因为它们本来就是同一件事）─────────────
+##   ① 空中加速      —— 按键能改多少速度
+##   ② 空中转向      —— 按键能改多少方向
+##   ③ （没有第三件：**空中不减速**）
+##
+## ── 关于「空中不减速」这条要说清楚 ────────────────────────────
+## 空中没有摩擦。所以松开按键时，水平速度**原样保留**，
+## 不是逐渐衰减到零。这一条不是物理洁癖，是因为：
+##   如果空中会掉速，你一松手就在空中急刹车 ——
+##   那正是你要去掉的「喷气背包」的镜像版本，一样假。
+##
+## ── 它和跳跃的分工 ───────────────────────────────────────────
+##   jump_velocity 决定「跳多高」      air_control 决定「跳出去之后还听不听话」
+## 前者是空间，后者是操控权。**两个都要调，跳跃才是一次「有后果的动作」。**
+##
+## ── 这也是后期那些位移技能/道具的插口 ───────────────────────
+##   二段跳、冲刺、喷气、滑翔 —— 它们全都是「在特定条件下把 air_control 临时拉高」。
+##   所以现在把它做成一个参数而不是写死 0，是有意的：
+##   将来加技能时，改的是**这个数**，不用重写移动逻辑。
+##
+## 参照：黑魂那一类游戏里跳跃是近乎 0 的空中操控（你被锁在弹道上）；
+##       而 Quake 那一类的空气操控是核心玩法。**两种都对，看你要哪个游戏。**
+@export var air_control := 0.0
+
 var _head: Node3D
 var _camera: Camera3D
 var _yaw := 0.0
@@ -160,12 +193,23 @@ func _physics_process(delta: float) -> void:
 	var speed: float = sprint_speed if Input.is_action_pressed("sprint") else walk_speed
 	var horizontal := Vector3(velocity.x, 0.0, velocity.z)
 
-	if has_input:
+	# ── 空中 / 地面的操控权不同（2026-10-14 晚）──────────────────────
+	# control 是**倍率**，同时作用在「加速」和「转向」上 ——
+	# 因为它们本来就是同一件事：你在空中还剩下多少操控权。
+	#   地面上 control 恒为 1。
+	#   空中   control = air_control（默认 0，也就是纯弹道）。
+	var on_floor := is_on_floor()
+	var control := 1.0 if on_floor else air_control
+	# 纯弹道：空中且操控权为 0 → 水平速度原封不动。
+	# 起跳那一刻的速度被完整保留，直到落地 —— 期间按什么键都不影响。
+	var ballistic := not on_floor and control <= 0.0001
+
+	if not ballistic and has_input:
 		# 方向与大小分开算，这样「起步快」和「转身慢」就不打架。
 		var wanted_dir := wish.normalized()
 		# 已经在动时，朝向取「当前速度方向」；从静止起步时才直接用输入方向。
 		var dir := horizontal.normalized() if horizontal.length() > 0.05 else wanted_dir
-		var max_turn := deg_to_rad(steer_rate_deg) * delta
+		var max_turn := deg_to_rad(steer_rate_deg) * control * delta
 		var angle := dir.signed_angle_to(wanted_dir, Vector3.UP)
 		dir = dir.rotated(Vector3.UP, clampf(angle, -max_turn, max_turn))
 
@@ -179,11 +223,14 @@ func _physics_process(delta: float) -> void:
 		if turn_speed_keep < 0.999:
 			var turn_ratio := clampf(absf(angle) / (PI * 0.5), 0.0, 1.0)
 			target_speed = lerpf(speed, speed * turn_speed_keep, turn_ratio)
-		var cur := move_toward(horizontal.length(), target_speed, acceleration * delta)
+		var cur := move_toward(horizontal.length(), target_speed, acceleration * control * delta)
 		horizontal = dir * cur
-	else:
-		# 松手：方向不再改变（这是惯性的来源之一），只让速度衰减。
+	elif on_floor:
+		# 地面上松手：摩擦让它停下来。方向不再改变（这是惯性的来源之一）。
 		horizontal = horizontal.move_toward(Vector3.ZERO, deceleration * delta)
+
+	# 空中松手（或纯弹道）：**什么都不做** —— 空中没有摩擦，速度保留。
+	# 这一行空着不是我漏了，是本轮改动的一半。
 
 	velocity.x = horizontal.x
 	velocity.z = horizontal.z

@@ -42,9 +42,26 @@ enum Phase { IDLE, WINDUP, ACTIVE, RECOVERY }
 ## 后摇：收刀。这段时间你不能再次挥击 —— 它是「挥空有代价」的唯一来源。
 @export var recovery := 0.30
 
-@export_group("形状")
+@export_group("挥击形状")
 ## 一次挥击扫过的角度。90 以下像戳，150 以上像抡。
 @export var swing_angle_deg := 110.0
+
+## 挥击的**倾斜**（度）。**这一项决定「像不像一次真的挥砍」。**
+##
+##   0  = 纯横扫：刀在**一个水平面里**扫过去 —— 这就是改之前唯一的动作，
+##        也就是你说的「只有左右砍」。
+##   90 = 纯下劈：刀从上往下直落。
+##   30 = 斜劈：从右上往左下 —— **屠刀真实的用法**，也是当前默认。
+##
+## 它为什么比「扫掠角」更值得动：
+##   扫掠角决定「扫多远」，倾斜决定「往哪个平面扫」。
+##   第一人称看不见自己的手，所以「刀在一个水平面上平移」这件事
+##   读起来不像挥砍，更像画面里横着划过一根铁条。
+##   一旦它有了下压分量，你的前庭才认得出那是一次「劈」。
+##
+## ⚠️ 0 和 180 都不动它 —— 那是两个极端，各自只在特定武器上成立。
+##    屠刀是重工具，它只有一种挥法：抡起来砸下去。
+@export var swing_tilt_deg := 30.0
 
 ## 刀刃的**容错半径**（米）。检测形状是沿刀身的胶囊，这就是它的半径。
 ##
@@ -68,6 +85,40 @@ var blade_length := 0.80
 ## 刀身中点距手腕的距离（米）。同上，由模型注入。
 var blade_center := 0.485
 
+@export_group("持刀姿态")
+## ⭐ **这一组里只有一项必须懂：roll。** 另外两项是微调。
+##
+## ── 为什么刀刃朝下的时候，你反而看不见刀 ──────────────────────
+## 一把刀可以看成一个薄片：长（刀身方向）× 高（刀面）× 厚。
+## 屠刀的「刀面」有 20 多厘米高，但你**从上往下看刀背**的时候，
+## 眼睛里剩下的是**厚度那 3 厘米**。
+## 所以无论刀做得多宽、多重、多像屠刀 ——
+## 只要它刀刃朝正下方、刀尖朝正前方，第一人称看到的永远是一根细铁条。
+##
+## **这不是建模没做好，这是视角问题。** 真人持刀时会把手腕翻过来，
+## 让刀面朝向自己 —— 那个动作就是 roll。
+##
+## 拖到 0    → 刀面完全侧对镜头，你只能看见刀背的厚度（= 改之前的样子）
+## 拖到 -45  → 刀面斜朝镜头（当前默认）。刀有多宽、刃口多亮，全看得见
+## 拖到 -90  → 刀面完全正对镜头，像举着一面镜子
+## 它是「这把刀长什么样」和「这把刀看起来像不像武器」之间的唯一开关。
+@export var hold_roll_deg := -45.0:
+	set(v):
+		hold_roll_deg = v
+		_apply_hold()
+
+## 静止时刀尖抬起（正）/ 下压（负），单位度。微调项。
+@export var hold_pitch_deg := 8.0:
+	set(v):
+		hold_pitch_deg = v
+		_apply_hold()
+
+## 静止时刀尖偏左（正）/ 偏右（负），单位度。微调项。
+@export var hold_yaw_deg := 10.0:
+	set(v):
+		hold_yaw_deg = v
+		_apply_hold()
+
 @export_group("反馈")
 ## 顿帧时长（秒）。命中瞬间世界几乎停住 —— 这是最重要的一味料。
 @export var hitstop := 0.06
@@ -85,6 +136,9 @@ var hit_count := 0
 
 var _phase: Phase = Phase.IDLE
 var _t := 0.0
+## 「肩膀」。挥砍的旋转施加在它上面 —— 它不动位置，只转。
+var _swing: Node3D
+## 「手腕」。位置固定，只负责静止持刀姿态（刀面朝哪个方向）。
 var _pivot: Node3D
 var _blade_mid: Marker3D
 var _shapecast: ShapeCast3D
@@ -97,9 +151,11 @@ var _hitstop_busy := false
 
 
 func _ready() -> void:
-	_pivot = get_node_or_null("Pivot")
-	_blade_mid = get_node_or_null("Pivot/BladeMid") as Marker3D
-	_shapecast = get_node_or_null("Pivot/ShapeCast3D") as ShapeCast3D
+	_swing = get_node_or_null("Swing") as Node3D
+	_pivot = get_node_or_null("Swing/Pivot") as Node3D
+	_blade_mid = get_node_or_null("Swing/Pivot/BladeMid") as Marker3D
+	_shapecast = get_node_or_null("Swing/Pivot/ShapeCast3D") as ShapeCast3D
+	_apply_hold()
 	_rebuild_shape()
 
 	# 刀不能砍到自己：把第一个 CharacterBody3D 祖先排除掉。
@@ -135,8 +191,36 @@ func visual_tip() -> float:
 	return blade_center + blade_length * 0.5
 
 
-func _physics_process(delta: float) -> void:
+## 刀尖在**世界空间**的位置。
+## 读数「刀尖距眼」和自检都用它 —— 之前的「臂展」是从手腕量的，
+## 但手腕自己也会被挥砍带着跑（绕肩膀转），从手腕量会少算一截。
+func tip_global_position() -> Vector3:
 	if _pivot == null:
+		return global_position
+	return _pivot.global_transform * Vector3(0.0, 0.0, -visual_tip())
+
+
+## 刀面法线与「手腕 → 目标」方向的夹角（度）。
+##   0° = 刀面正对镜头，整片刀面都看得见
+##  90° = 刀面完全侧对，眼睛里只剩刀背那几厘米厚度
+##
+## 自检用它把一个肉眼问题变成数字：**这片刀面到底看不看得见。**
+## 「武器看起来不像屠刀」这件事，量出来的根因就是这个角。
+func blade_face_angle_to_deg(target_global: Vector3) -> float:
+	if _pivot == null:
+		return 180.0
+	var n := _pivot.global_transform.basis.x.normalized()
+	var d := (target_global - _pivot.global_position)
+	if d.length() < 0.0001:
+		return 0.0
+	d = d.normalized()
+	# 刀有两个面，取朝向目标的那一个。
+	return rad_to_deg(minf(acos(clampf(n.dot(d), -1.0, 1.0)),
+		acos(clampf(-n.dot(d), -1.0, 1.0))))
+
+
+func _physics_process(delta: float) -> void:
+	if _swing == null:
 		return
 
 	if enable and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED \
@@ -183,22 +267,50 @@ func _advance(delta: float) -> void:
 
 
 func _apply_pose() -> void:
-	_pivot.rotation.y = _swing_angle()
+	_swing.rotation = _swing_pose()
 
 
-func _swing_angle() -> float:
+## 静止持刀姿态。只写一次，挥砍不会动它。
+## 它和挥击是**两个节点**上的两件事 ——
+##   Pivot（手腕）＝ 刀怎么拿      Swing（肩膀）＝ 刀怎么挥
+## 混在一起写，你就会在调姿态时把动作一起改掉。
+func _apply_hold() -> void:
+	if _pivot != null:
+		_pivot.rotation_degrees = Vector3(hold_pitch_deg, hold_yaw_deg, hold_roll_deg)
+
+
+## 挥击的姿态 —— 返回 (pitch, yaw, roll)，作用在肩膀节点上。
+##
+## 用「归一化进度 s ∈ [-1, +1]」统一描述整个动作，三段自动衔接：
+##   s = -1 → 抬到右上（举起）
+##   s =  0 → 正前方（落点）
+##   s = +1 → 压到左下（收势）
+##
+## 两个分量分别跟 s 走：
+##   yaw   = s × 半个扫掠角   → 横向扫过多远
+##   pitch = -s × 倾斜角      → 纵向劈下多少（**这就是「像不像劈砍」的那一项**）
+##
+## 为什么 pitch 要跟着 s 一起走，而不是单独做一段抬手动画：
+##   因为**一次挥砍只有一个动作**。抬手和劈下是同一个弧的两端，
+##   分成两段写，中间一定会在某一帧对不上，看起来就是「抖了一下」。
+func _swing_pose() -> Vector3:
 	var half := deg_to_rad(swing_angle_deg) * 0.5
+	var tilt := deg_to_rad(swing_tilt_deg)
 	match _phase:
 		Phase.WINDUP:
-			var p := clampf(_t / maxf(windup, 0.001), 0.0, 1.0)
-			return lerpf(0.0, -half, _ease_out(p))     # 往右后抬
+			# 抬手：刀尖往右上走。用缓出 —— 起步快、到位慢，像真的在蓄力。
+			var k := _ease_out(clampf(_t / maxf(windup, 0.001), 0.0, 1.0))
+			return Vector3(tilt * k, -half * k, 0.0)
 		Phase.ACTIVE:
-			var p := clampf(_t / maxf(active, 0.001), 0.0, 1.0)
-			return lerpf(-half, half, p)               # 匀速扫过去 —— 匀速才看得出窗口
+			# 挥出：**匀速**扫过。匀速才看得出「有效窗口」在哪 ——
+			# 一旦这里做缓动，命中窗口就变成了一个不可预期的时刻。
+			var s := lerpf(-1.0, 1.0, clampf(_t / maxf(active, 0.001), 0.0, 1.0))
+			return Vector3(-tilt * s, half * s, 0.0)
 		Phase.RECOVERY:
-			var p := clampf(_t / maxf(recovery, 0.001), 0.0, 1.0)
-			return lerpf(half, 0.0, _ease_out(p))      # 收刀
-	return 0.0
+			# 收刀：从落点回到持刀姿态。
+			var k := 1.0 - _ease_out(clampf(_t / maxf(recovery, 0.001), 0.0, 1.0))
+			return Vector3(-tilt * k, half * k, 0.0)
+	return Vector3.ZERO
 
 
 func _ease_out(p: float) -> float:

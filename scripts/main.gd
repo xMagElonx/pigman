@@ -57,31 +57,38 @@ extends Node3D
 ## ⚠️ M3 的真敌人要设为 0 —— 敌人不该复活。
 @export var dummy_auto_respawn := 2.5
 
-# ── 刀的身材。只在这里写一次，模型和碰撞箱都从它来。──────────────
+# ── 屠刀的身材。只在这里写一次，模型和碰撞箱都从它来。──────────────
 # 改这里 = 同时改模型和命中范围，永远不会出现「看着更长、判定更短」。
 #
-# ── 2026-10-14 晚：换成屠刀（cleaver）原型 ───────────────────────
-# 从「细长的直刀」（0.085 厚 × 0.028 宽 × 1.15 长）改成「短、宽、厚背的屠刀」。
-# 三处形状差异，每一处都有理由：
+# ⚠️ 2026-10-14 的第二版换型。第一版没做成屠刀，原因很具体：
 #
-#   ① **刀身平面竖起来了** —— 现在是 x=刀厚（左右 4 cm）/ y=刀宽（上下 16.5 cm）。
-#      之前刀是「平躺」的，你从上往下只看得到一条细线。
-#      竖起来之后，刀宽的那一面正对着你的眼睛 ——
-#      你才**看得见「刃在哪一边」**。而「刃在哪一边」是四向攻击的前提：
-#      如果连哪边是刃都看不出来，四向就只是四个不同的动画。
+#   ① **刀太长**（0.80 m × 0.165 m，长高比 4.8:1）。那不是屠刀的比例，
+#      是一把砍刀的。真实屠刀的长高比在 1.8:1 上下 —— 短而高。
+#      → 现在 0.40 × 0.22 = 1.8:1。
 #
-#   ② 多了**背脊**和**刃口**两条（在 _build_weapon 里）。
-#      真实屠刀是**单边开刃**：一边厚、一边薄。这意味着这把刀**自己带一个方向**，
-#      不需要额外做 UI 去指示方向 —— 刀的形状本身就是指示器。
+#   ② **刀面朝向错了**（这一条才是主因，跟尺寸无关）。
+#      刀刃朝正下方时，刀面是**侧对**镜头的 —— 你从上往下看刀背，
+#      眼睛里剩下的是厚度那 3 厘米。所以刀做得再宽，看到的都是一根细铁条。
+#      → 修法不在模型里，在**持刀姿态**里：把刀绕自身长轴转过来
+#        （weapon.gd 的 `hold_roll_deg`，默认 -45°）。
+#        这意味着「武器看起来不像屠刀」这个问题，
+#        真正的开关不在 main.gd 而在 weapon.gd —— 这一行注释就是路标。
 #
-#   ③ **变短了**（1.15 → 0.80）。这一条是唯一会改变玩法的：
-#      臂展从 1.31 m 缩到约 0.96 m（按你存档里的 blade_radius 算是 1.01 m）。
-#      你必须**贴得更近**才能砍到。这是刻意的 —— 屠刀是重工具，不是长剑。
-#      ⚠️ 嫌短就把下面的 0.80 调大，模型和碰撞箱会一起变（它们共用这一份数据）。
-const BLADE_SIZE := Vector3(0.040, 0.165, 0.80)
+#   ③ **手长在脸上**。手腕原来只在眼前 0.12 m 处，等于刀是从脸上长出来的。
+#      → 现在手腕在眼前约 0.42 m（SHOULDER_OFFSET + WRIST_OFFSET），
+#        刀身作为「一条伸出去的手臂的延长」出现。
+const BLADE_SIZE := Vector3(0.032, 0.22, 0.40)
 ## 刀身中点相对手腕（Pivot）的 z 偏移。负数 = 朝前。
-## 算法：刀根固定在腕前 0.085，所以中点 = -(0.085 + 刀长/2)。
-const BLADE_CENTER_Z := -0.485
+## 算法：刀根固定在腕前 0.11，所以中点 = -(0.11 + 刀长/2)。
+const BLADE_CENTER_Z := -0.31
+## 刀根（护手位置）相对手腕的 z 偏移。
+const BLADE_ROOT_Z := -0.11
+## 「肩膀」相对摄像机（Head）的偏移。
+## 第一人称看不见身体，所以它只是一个**不可见的旋转中心** ——
+## 但挥砍必须绕它转，理由见 _build_weapon() 里那段注释。
+const SHOULDER_OFFSET := Vector3(0.17, -0.38, 0.02)
+## 「手腕」相对肩膀的偏移。手臂长度 = 它的模长 ≈ 0.46 m。
+const WRIST_OFFSET := Vector3(0.10, 0.10, -0.44)
 
 var _player: PlayerController
 var _weapon: MeleeWeapon
@@ -147,19 +154,49 @@ func _process(_delta: float) -> void:
 	# 「方向偏差」是 2026-10-13 加的：速度方向和朝向差多少度。
 	# 0° = 身体听话；转身时会瞬间飚到 90°~180° 再回落 ——
 	# 那个「莫名其妙的左右位移」第一次变成可读的数字。
+	# 「刀面偏角」是 2026-10-14 晚加的读数。
+	# 它回答的是一个肉眼问题：**这片刀面到底看不看得见。**
+	#   0°  = 刀面正对镜头，屠刀有多宽一目了然
+	#   90° = 刀面侧对镜头，眼睛里只剩刀背那 3 厘米（= 改之前的样子）
+	# 拖「持刀翻转 roll」时盯这一格 —— 它就是把「看起来不像屠刀」变成数字的地方。
 	_tuner.set_readout(
-		"%s    臂展 %.2f m\n速度 %.2f m/s   方向偏差 %.0f°   地面 %s   %s   FPS %d\n靶子 %s"
+		"%s    刀尖距眼 %.2f m   刀面偏角 %.0f°\n速度 %.2f m/s   %s   %s   方向偏差 %.0f°   FPS %d\n靶子 %s"
 		% [
 			weapon_txt,
-			_weapon.reach() if _weapon != null else 0.0,
+			_tip_distance(),
+			_face_angle(),
 			_player.horizontal_speed(),
-			_player.steer_offset_deg(),
-			"是" if _player.is_on_floor() else "否",
+			"地面" if _player.is_on_floor() else "空中(操控 %.2f)" % _player.air_control,
 			_jump_text(),
+			_player.steer_offset_deg(),
 			Engine.get_frames_per_second(),
 			_dummy_hp_text(),
 		]
 	)
+
+
+## 刀尖到眼睛的距离（米）。
+## 为什么不用武器自己报的 reach()：那是**从手腕**量的。
+## 手腕自己也在被挥砍带着绕肩膀转 —— 从手腕量会少算一截，
+## 而玩家感知到的距离是「刀尖离我的眼睛多远」。
+func _tip_distance() -> float:
+	var cam := _camera()
+	if _weapon == null or cam == null:
+		return 0.0
+	return cam.global_position.distance_to(_weapon.tip_global_position())
+
+
+func _face_angle() -> float:
+	var cam := _camera()
+	if _weapon == null or cam == null:
+		return 0.0
+	return _weapon.blade_face_angle_to_deg(cam.global_position)
+
+
+func _camera() -> Camera3D:
+	if _player == null:
+		return null
+	return _player.get_node_or_null("Head/Camera3D") as Camera3D
 
 
 ## 跳跃那一格读数。
@@ -259,33 +296,54 @@ func _build_weapon() -> void:
 	_weapon = MeleeWeapon.new()
 	_weapon.name = "Weapon"
 
-	# Pivot 就是「手腕」：绕它转 y 轴 = 横斩。
-	# 位置放在画面右下角，是因为第一人称里刀身从正中横过去会挡住你看敌人。
+	# ── 两级节点。它们的分工必须分清楚（2026-10-14 晚改）──────────
 	#
-	# ⚠️ 注意这个 -0.22 的 y 偏移：它意味着**刀的基准高度约 1.43 m**
-	#    （眼高 1.65 − 0.22）。靶子全高 2.00 m，所以站着挥刀落在靶身上。
-	#    但跳起 1.02 m 之后刀会升到约 2.45 m —— **高出靶子头顶**。
-	#    这是跳跃一打开就立刻出现的第一个真实冲突，见 player_controller.gd。
+	#   Swing（肩膀）＝ **挥砍的旋转施加在这里**。位置固定，只转。
+	#   Pivot（手腕）＝ 位置固定，只负责**静止持刀姿态**（刀面朝哪）。
+	#
+	# 为什么必须拆成两级 —— 改之前旋转是直接加在手腕上的：
+	#   那样刀是**绕着手腕原地翻**，手腕自己一动不动。
+	#   真实的挥砍是整条手臂绕肩膀转，手腕自己也在走一条弧线。
+	#   这个差别肉眼读出来就是：
+	#     绕手腕转 → 「刀被钉在脸上转了一下」
+	#     绕肩膀转 → 「抡出去了」
+	#   攻击动作「很怪」，一半的原因在这个旋转中心上，不在角度上。
+	#
+	# ⚠️ 第一人称看不见身体，肩膀是一个**不可见的点**。但它的位置必须给对
+	#    （SHOULDER_OFFSET 在脑袋右侧偏下），否则整条手臂的圆心会跑到错误的地方。
+	var shoulder := Node3D.new()
+	shoulder.name = "Swing"
+	shoulder.position = SHOULDER_OFFSET
+	_weapon.add_child(shoulder)
+
 	var pivot := Node3D.new()
 	pivot.name = "Pivot"
-	pivot.position = Vector3(0.30, -0.22, -0.12)
-	_weapon.add_child(pivot)
+	pivot.position = WRIST_OFFSET
+	# 姿态由 weapon.gd 的 hold_* 三个参数驱动（可在面板上调）。
+	shoulder.add_child(pivot)
 
-	# 柄：屠刀是工具，柄粗、长（能双手攥）。颜色偏木/胶的暗调。
-	pivot.add_child(_mesh_box("Handle", Vector3(0.048, 0.052, 0.30), Vector3(0.0, 0.0, 0.10), Color(0.14, 0.13, 0.15)))
+	# 柄：屠刀是工具，柄粗、短（一手攥死）。颜色偏木/胶的暗调。
+	pivot.add_child(_mesh_box("Handle", Vector3(0.042, 0.052, 0.26), Vector3(0.0, 0.0, 0.02), Color(0.20, 0.16, 0.13)))
+	# 柄尾配重块。屠刀有这个 —— 它让「柄到哪算到头」一眼可辨。
+	pivot.add_child(_mesh_box("Butt", Vector3(0.050, 0.060, 0.022), Vector3(0.0, 0.0, 0.165), Color(0.30, 0.29, 0.32)))
 	# 挡片：屠刀没有十字护手，只有一块挡住手的小铁片。
-	pivot.add_child(_mesh_box("Collar", Vector3(0.062, 0.10, 0.035), Vector3(0.0, 0.0, -0.052), Color(0.34, 0.32, 0.35)))
+	pivot.add_child(_mesh_box("Collar", Vector3(0.056, 0.17, 0.028), Vector3(0.0, 0.0, -0.118), Color(0.34, 0.32, 0.35)))
 
 	# 刀身：尺寸来自常量 —— 和下面的命中形状是同一份数据。
-	pivot.add_child(_mesh_box("Blade", BLADE_SIZE, Vector3(0.0, 0.0, BLADE_CENTER_Z), Color(0.72, 0.74, 0.78)))
+	# 颜色刻意压暗一点：亮的是刃口那一线，刀面太亮会把刃口吃掉。
+	pivot.add_child(_mesh_box("Blade", BLADE_SIZE, Vector3(0.0, 0.0, BLADE_CENTER_Z), Color(0.58, 0.60, 0.64)))
 
 	# 屠刀的两个特征部位。它们**不参与命中判定**（判定是沿刀身的一条胶囊），
 	# 存在的唯一理由是让你一眼看出**刃在哪一边**：
-	#   上缘那根更厚的 = 背脊（刀背）    下缘那根更薄的 = 刃口
-	pivot.add_child(_mesh_box("Spine", Vector3(0.056, 0.026, BLADE_SIZE.z),
-		Vector3(0.0, BLADE_SIZE.y * 0.5 - 0.013, BLADE_CENTER_Z), Color(0.46, 0.47, 0.50)))
-	pivot.add_child(_mesh_box("Edge", Vector3(0.014, 0.016, BLADE_SIZE.z),
-		Vector3(0.0, -BLADE_SIZE.y * 0.5 + 0.008, BLADE_CENTER_Z), Color(0.95, 0.96, 0.99)))
+	#   上缘那根更厚的 = 背脊（刀背）    下缘那根更亮的 = 刃口
+	#
+	# ⚠️ 它们现在能被看见了 —— 但让它们被看见的不是这两行，
+	#    是 weapon.gd 里的 hold_roll_deg。刀面侧对镜头时，
+	#    这两根线和刀身处在同一个平面上，等于白做。
+	pivot.add_child(_mesh_box("Spine", Vector3(0.046, 0.026, BLADE_SIZE.z),
+		Vector3(0.0, BLADE_SIZE.y * 0.5 - 0.013, BLADE_CENTER_Z), Color(0.40, 0.41, 0.44)))
+	pivot.add_child(_mesh_box("Edge", Vector3(0.012, 0.018, BLADE_SIZE.z),
+		Vector3(0.0, -BLADE_SIZE.y * 0.5 + 0.009, BLADE_CENTER_Z), Color(0.95, 0.96, 0.99)))
 
 	# 刀身中点。扫掠检测以它为参照 —— 它比刀尖更代表「刀在哪」。
 	var mid := Marker3D.new()
@@ -356,10 +414,15 @@ func _tuner_entries() -> Array:
 		{"label": "eye_height  眼高", "target": _player, "prop": "eye_height", "min": 1.0, "max": 2.2, "step": 0.01},
 		{"label": "gravity  重力", "target": _player, "prop": "gravity", "min": 0.0, "max": 60.0, "step": 0.5},
 		{"label": "jump_velocity  跳跃(空格)", "target": _player, "prop": "jump_velocity", "min": 0.0, "max": 12.0, "step": 0.1},
+		{"label": "air_control  空中操控 0-1", "target": _player, "prop": "air_control", "min": 0.0, "max": 1.0, "step": 0.05},
 	]
 
 	if _weapon != null:
 		entries.append_array([
+			{"label": "│ 持刀翻转 roll °", "target": _weapon, "prop": "hold_roll_deg", "min": -90.0, "max": 0.0, "step": 5.0},
+			{"label": "│ 持刀抬起 pitch °", "target": _weapon, "prop": "hold_pitch_deg", "min": -30.0, "max": 40.0, "step": 2.0},
+			{"label": "│ 持刀偏向 yaw °", "target": _weapon, "prop": "hold_yaw_deg", "min": -30.0, "max": 40.0, "step": 2.0},
+			{"label": "│ 挥击倾斜 tilt °", "target": _weapon, "prop": "swing_tilt_deg", "min": 0.0, "max": 90.0, "step": 5.0},
 			{"label": "│ 刀刃容错 radius m", "target": _weapon, "prop": "blade_radius", "min": 0.02, "max": 0.30, "step": 0.005},
 			{"label": "│ 前摇 windup s", "target": _weapon, "prop": "windup", "min": 0.0, "max": 0.5, "step": 0.01},
 			{"label": "│ 命中窗口 active s", "target": _weapon, "prop": "active", "min": 0.02, "max": 0.40, "step": 0.01},
