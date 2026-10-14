@@ -639,24 +639,24 @@ func _tuner_entries() -> Array:
 	# ⚠️ 「握持点前后」把**整坨武器**沿 Z 平移 → 刀尖距眼、挥砍绕肩半径一起变（预期，非 bug）；
 	#    「柄长 / 柄径 / 露柄舌」只改柄外观，不动刀（见 _rebuild_handle 注释）。
 	entries.append_array([
-		{"label": "│ 柄长 m", "target": self, "prop": "handle_len", "min": 0.140, "max": 0.280, "step": 0.005},
-		{"label": "│ 柄径 m", "target": self, "prop": "handle_dia", "min": 0.028, "max": 0.052, "step": 0.001},
-		{"label": "│ 握持点前后 m", "target": self, "prop": "grip_offset", "min": -0.050, "max": 0.050, "step": 0.005},
-		{"label": "│ 露柄舌长 m", "target": self, "prop": "neck_len", "min": 0.000, "max": 0.030, "step": 0.002},
-		{"label": "│ 柄尾加粗 m", "target": self, "prop": "butt_bulge", "min": 0.000, "max": 0.020, "step": 0.002},
+		{"label": "│ 柄长 m", "target": self, "prop": "handle_len", "group": "handle", "min": 0.140, "max": 0.280, "step": 0.005},
+		{"label": "│ 柄径 m", "target": self, "prop": "handle_dia", "group": "handle", "min": 0.028, "max": 0.052, "step": 0.001},
+		{"label": "│ 握持点前后 m", "target": self, "prop": "grip_offset", "group": "handle", "min": -0.050, "max": 0.050, "step": 0.005},
+		{"label": "│ 露柄舌长 m", "target": self, "prop": "neck_len", "group": "handle", "min": 0.000, "max": 0.030, "step": 0.002},
+		{"label": "│ 柄尾加粗 m", "target": self, "prop": "butt_bulge", "group": "handle", "min": 0.000, "max": 0.020, "step": 0.002},
 	])
 
 	entries.append_array([
-		{"label": "│ 靶子开关 0/1", "target": self, "prop": "dummy_switch", "min": 0.0, "max": 1.0, "step": 1.0},
-		{"label": "│ 靶子自动复位 sec", "target": self, "prop": "dummy_auto_respawn", "min": 0.0, "max": 10.0, "step": 0.5},
+		{"label": "│ 靶子开关 0/1", "target": self, "prop": "dummy_switch", "group": "dummy", "min": 0.0, "max": 1.0, "step": 1.0},
+		{"label": "│ 靶子自动复位 sec", "target": self, "prop": "dummy_auto_respawn", "group": "dummy", "min": 0.0, "max": 10.0, "step": 0.5},
 	])
 
 	# 音效音量（探索卡 §5 列的「音效音量」入口）。
-	# target 是 autoload `Sfx` —— TuningStore 会把它归到 world 组，
-	# 键名 master_db 在整棵树上唯一，不与刀身/柄/靶子撞名。
+	# target 是 autoload `Sfx`。它**显式声明 group = "sfx"** —— 不要再靠类型推断，
+	# 也不要让它落进 world 兜底组（那里是「没被认领」的对象住的地方，容易撞名）。
 	# 没有音色文件时它是「静音也没关系」的状态，见 scripts/sfx.gd。
 	entries.append_array([
-		{"label": "│ 音效音量 dB", "target": Sfx, "prop": "master_db", "min": -40.0, "max": 6.0, "step": 1.0},
+		{"label": "│ 音效音量 dB", "target": Sfx, "prop": "master_db", "group": "sfx", "min": -40.0, "max": 6.0, "step": 1.0},
 	])
 
 	return entries

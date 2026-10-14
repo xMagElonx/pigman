@@ -62,6 +62,8 @@ func _run() -> void:
 	await _check_handle_axis(main)
 	await _check_one_swing_one_hit(main)
 	await _check_audio_wired(main)
+	await _check_keys_unique(main)
+	await _check_legacy_migration(main)
 
 
 # --- 工具 -------------------------------------------------------------------
@@ -269,3 +271,80 @@ func _check_audio_wired(main: Node) -> void:
 		delta == 1,
 		"一次挥击 → Sfx 被调用 %d 次（期望 1）｜已播 %d 次｜还缺的音色: %s"
 			% [delta, Sfx.played, str(Sfx.missing_events())])
+
+
+# --- ⑦ 调参键全局唯一（防未来撞名）-----------------------------------------
+
+## 键名 = 「组.属性名」，是存档里的地址。两条不同的 entry 一旦算出同一个键，
+## 它们就会**静默互相覆盖** —— 拖 A 会改到 B，交换存读还不报错。
+##
+## 这条断言是给未来买的保险：M3 加 Enemy 参数时，只要键撞了，这里立刻报红。
+func _check_keys_unique(main: Node) -> void:
+	var seen := {}
+	var dups: Array = []
+	for e in main._tuning_entries:
+		var k: String = TuningStore.key_of(e)
+		if seen.has(k):
+			dups.append(k)
+		seen[k] = true
+
+	_ok("⑦ 调参键全局唯一（无同名互覆盖）",
+		dups.is_empty(),
+		"%d 条 entry → %d 个唯一键%s"
+			% [main._tuning_entries.size(), seen.size(),
+				"；重复: " + str(dups) if not dups.is_empty() else ""])
+
+
+# --- ⑧ 旧档迁移（改组名不许丢用户的值）-------------------------------------
+
+## 造一份**旧格式** cfg（非 player/weapon 的参数全躺在 world 组下）写进一个
+## **临时路径**，让 load_into 读它，断言值确实被读进了 target 属性。
+##
+## ⚠️ 只用临时路径 user://_selfcheck_migrate.cfg，**绝不碰**真正的
+##    user://tuning.cfg / tuning_snapshot.cfg。跑完把临时文件删掉。
+func _check_legacy_migration(main: Node) -> void:
+	var tmp := "user://_selfcheck_migrate.cfg"
+
+	var cf := ConfigFile.new()
+	# 旧键：刀身 / 柄 / 靶子 / 音效 —— 都曾在 world 组。
+	cf.set_value(TuningStore.SECTION, "world.blade_len", 0.71)
+	cf.set_value(TuningStore.SECTION, "world.handle_len", 0.212)
+	cf.set_value(TuningStore.SECTION, "world.dummy_auto_respawn", 7.5)
+	cf.set_value(TuningStore.SECTION, "world.master_db", -18.5)
+	# 精确性①的对照：同名属性**新键已存在**时，旧键必须被无视，新键胜出。
+	cf.set_value(TuningStore.SECTION, "world.blade_width", 0.30)      # 旧（应被忽略）
+	cf.set_value(TuningStore.SECTION, "blade.blade_width", 0.19)      # 新（应胜出）
+	var werr := cf.save(tmp)
+
+	# 先把目标属性改成**明显不同**的哨兵值，这样「读进来了」才看得见。
+	main._knife.blade_len = 0.20
+	main._knife.blade_width = 0.10
+	main.handle_len = 0.111
+	main.dummy_auto_respawn = 1.0
+	Sfx.master_db = 3.0
+
+	var n: int = TuningStore.load_into(main._tuning_entries, tmp)
+
+	var ok_blade: bool = absf(main._knife.blade_len - 0.71) < TOL
+	var ok_handle: bool = absf(main.handle_len - 0.212) < TOL
+	var ok_dummy: bool = absf(main.dummy_auto_respawn - 7.5) < TOL
+	var ok_sfx: bool = absf(Sfx.master_db - (-18.5)) < TOL
+	var ok_prio: bool = absf(main._knife.blade_width - 0.19) < TOL   # 新键胜出
+
+	_ok("⑧ 旧档迁移：world.* 旧键的值被读回新组键",
+		werr == OK and n >= 4 and ok_blade and ok_handle and ok_dummy and ok_sfx,
+		"写临时档=%s 载入=%d 项 ｜ blade_len=%.4f handle_len=%.4f "
+			% [("OK" if werr == OK else "ERR"), n, main._knife.blade_len, main.handle_len]
+			+ "dummy_respawn=%.3f master_db=%.2f"
+			% [main.dummy_auto_respawn, Sfx.master_db])
+
+	_ok("⑧ 精确性：新键存在时旧键被忽略（新键胜出）",
+		ok_prio,
+		"旧 world.blade_width=0.30 / 新 blade.blade_width=0.19 → 实得 %.4f"
+			% main._knife.blade_width)
+
+	# 清场：临时文件必须删掉（它只是这次自检的道具）。
+	TuningStore.erase(tmp)
+	_ok("⑧ 迁移自检的临时文件已删除",
+		not FileAccess.file_exists(tmp),
+		"%s → 存在=%s" % [tmp, str(FileAccess.file_exists(tmp))])
